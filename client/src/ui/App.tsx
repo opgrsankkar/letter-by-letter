@@ -95,8 +95,8 @@ export const App: React.FC = () => {
                             {hostWord && (
                                 <div className="p-3 rounded bg-slate-800 border border-slate-700">
                                     <h3 className="font-semibold mb-1">Current Word</h3>
-                                    <div className="tracking-wide text-lg font-mono">{hostWord}</div>
-                                    <div className="text-xs text-slate-400 mt-1">Visible only to you (host); stays until next round.</div>
+                                    <div className="tracking-wide text-lg font-mono">{hostWord.toLocaleUpperCase()}</div>
+                                    <div className="text-xs text-slate-400 mt-1">Visible only to you.</div>
                                 </div>
                             )}
                         </div>

@@ -134,6 +134,11 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
         room.round += 1;
         room.state = 'in-round';
         room.letters = {};
+        for (const p of room.players) {
+            const sock = io.sockets.sockets.get(p.socketId);
+            sock?.emit('assigned_letters', []); // clear previous letters
+            sock?.emit('host_word', ''); // clear previous host word
+        }
         chooseHost(room);
         broadcastRoom(roomId);
     });
