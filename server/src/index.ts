@@ -3,6 +3,9 @@ import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
 import { nanoid } from 'nanoid';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { ClientToServerEvents, ServerToClientEvents, Room, Player, PublicRoomView } from './types.js';
 
 const app = express();
@@ -181,6 +184,31 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
         }
     });
 });
+
+// Static client serving (production build) if available
+try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const packagedStatic = path.resolve(__dirname, './static');
+    const externalDist = path.resolve(__dirname, '../../client/dist');
+    let staticRoot: string | null = null;
+    if (fs.existsSync(packagedStatic)) {
+        staticRoot = packagedStatic;
+    } else if (fs.existsSync(externalDist)) {
+        staticRoot = externalDist;
+    }
+    if (staticRoot) {
+        app.use(express.static(staticRoot));
+        app.get(/^(?!\/socket\.io\/|\/health).+/, (_req, res) => {
+            res.sendFile(path.join(staticRoot!, 'index.html'));
+        });
+        console.log('Serving client build from', staticRoot);
+    } else {
+        console.log('No client build found (looked in', packagedStatic, 'and', externalDist, ')');
+    }
+} catch (e) {
+    console.warn('Static client serve setup failed:', e);
+}
 
 const PORT = Number(process.env.PORT) || 4000;
 const HOST = '0.0.0.0';

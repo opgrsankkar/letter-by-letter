@@ -1,0 +1,15 @@
+{
+    "name": "letter-by-letter-monorepo",
+    "private": true,
+    "version": "0.1.0",
+    "scripts": {
+        "build:client": "npm --prefix client install && npm --prefix client run build",
+        "build:server": "npm --prefix server install && npm --prefix server run build",
+        "build:all": "npm run build:client && npm run copy:client && npm run build:server",
+        "copy:client": "rm -rf server/dist/static && mkdir -p server/dist/static && cp -R client/dist/* server/dist/static/",
+        "start:prod": "node server/dist/index.js",
+        "dev": "npm --prefix server run dev & npm --prefix client run dev"
+    },
+    "optionalDependencies": {},
+    "devDependencies": {}
+}
