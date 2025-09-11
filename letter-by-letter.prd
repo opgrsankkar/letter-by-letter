@@ -1,0 +1,109 @@
+# 📑 Product Requirements Document (PRD)
+
+## Product Name
+
+**Letter by Letter (Facilitator App)**
+
+---
+
+## Goal
+
+A lightweight multiplayer web app that **removes the need for paper** by:
+
+1. Randomly selecting a **Host** each round.
+2. Allowing the Host to enter a **secret word**.
+3. Splitting that word into letters and **privately assigning them to players**.
+
+All other gameplay (clue giving, guessing, discussions) is done **verbally, in person**.
+
+---
+
+## Core Gameplay
+
+### Room System
+
+* One player creates a **room** (game session).
+* Other players join by entering the **room code**.
+* Designed for **local in-room play only** (no matchmaking, no public lobbies).
+
+### Round Sequence
+
+1. **Host Selection** → Server randomly selects one player as Host.
+2. **Word Input** → Host privately enters a word.
+3. **Letter Distribution** →
+
+   * Server splits the word into letters.
+   * Distributes letters randomly to non-host players.
+   * Each player sees only their assigned letters.
+4. **Verbal Gameplay** →
+
+   * Letter holders give **verbal clues** for their letters.
+   * Host gives a **verbal word clue**.
+   * Players make guesses verbally.
+   * The app is not involved in this step.
+5. **Next Round** →
+
+   * Server randomly picks a **new Host**.
+   * Repeat until the group decides to stop.
+
+---
+
+## Technical Requirements
+
+### Architecture
+
+* **Server**: Node.js + Express + Socket.io
+
+  * Manages rooms and round state.
+  * Randomly selects Host each round.
+  * Handles word submission and secure letter distribution.
+* **Client**: React + Tailwind
+
+  * Works on desktop/mobile browsers.
+  * Role-based views: Host (word entry), Player (letters assigned), Waiting Screen.
+
+### Networking
+
+* Clients connect to the host’s server via **local IP or room code**.
+* Support multiple rooms simultaneously (in case multiple groups are playing in the same network).
+
+---
+
+## Data Model
+
+```ts
+Room {
+  id: string,             // room code
+  players: Player[],
+  state: "waiting" | "in-round",
+  round: number,
+  hostId: string,
+  word?: string,
+  letters: Record<playerId, string[]> // assigned letters
+}
+
+Player {
+  id: string,
+  name: string,
+  socketId: string
+}
+```
+
+---
+
+## Non-Functional Requirements
+
+* **Zero gameplay logic beyond host & letter distribution.**
+* **Minimal UI** — quick setup and easy to use on phones.
+* **Privacy** — only Host sees the chosen word, only Letter Holders see their letters.
+* **3–8 players supported**.
+
+---
+
+## Future Features
+
+* Optional **round timer** (visual countdown).
+* Option for Host to pick **word category**.
+* Option to let the **app generate random words**.
+
+---
