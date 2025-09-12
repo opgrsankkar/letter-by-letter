@@ -5,9 +5,32 @@ export const App: React.FC = () => {
     const [name, setName] = useState('');
     const [roomCodeInput, setRoomCodeInput] = useState('');
     const [word, setWord] = useState('');
-    const { room, letters, connectCreate, connectJoin, startRound, submitWord, isHost, messages, dismissMessage, hostWord } =
-        useGameSocket();
-
+    const {
+        room,
+        letters,
+        connectCreate,
+        connectJoin,
+        startRound,
+        submitWord,
+        addPoint,
+        isHost,
+        playerId,
+        messages,
+        dismissMessage,
+        hostWord,
+    } = useGameSocket();
+    function getRandomWord() {
+        // fetch from /random-word endpoint
+        // make note during development the server listens on port 4000, while the client is on 5173
+        fetch('/random-word')
+            .then((res) => res.json())
+            .then((data) => {
+                if (data.word) setWord(data.word);
+            })
+            .catch((err) => {
+                console.error('Error fetching random word:', err);
+            });
+    }
     return (
         <div className="max-w-md mx-auto p-4 space-y-4 relative">
             <h1 className="text-2xl font-bold text-center">Letter by Letter</h1>
@@ -45,7 +68,6 @@ export const App: React.FC = () => {
                     </div>
                 </div>
             )}
-
             {room && (
                 <div className="space-y-4">
                     <div className="flex justify-between items-center text-sm">
@@ -53,21 +75,54 @@ export const App: React.FC = () => {
                         <span>Round: {room.round}</span>
                     </div>
                     <div>
-                        <h2 className="font-semibold">Players</h2>
-                        <ul className="text-sm space-y-1">
-                            {room.players.map((p) => (
-                                <li key={p.id} className={p.id === room.hostId ? 'text-amber-400' : ''}>
-                                    {p.name}
-                                    {p.id === room.hostId && ' (Host)'}
-                                </li>
-                            ))}
-                        </ul>
+                        <div className="flex gap-4">
+                            <div className="flex-1">
+                                <h3 className="font-semibold text-sm mb-1">
+                                    Team Red
+                                    {/* Team Score */}
+                                    {' - '}
+                                    {room.players.filter((p) => p.team === 'Red').reduce((acc, p) => acc + p.score, 0)} points
+                                </h3>
+
+                                <ul className="text-sm space-y-1">
+                                    {room.players
+                                        .filter((p) => p.team === 'Red')
+                                        .map((p) => (
+                                            <li key={p.id} className={p.id === room.hostId ? 'text-amber-400' : ''}>
+                                                {p.name}
+                                                {p.id === playerId && <span className="ml-1 text-xs text-emerald-400">(You)</span>}
+                                                {p.id === room.hostId && ' (Host)'}
+                                            </li>
+                                        ))}
+                                </ul>
+                            </div>
+                            <div className="flex-1">
+                                <h3 className="font-semibold text-sm mb-1">
+                                    Team Blue
+                                    {' - '}
+                                    {room.players.filter((p) => p.team === 'Blue').reduce((acc, p) => acc + p.score, 0)} points
+                                </h3>
+                                <ul className="text-sm space-y-1">
+                                    {room.players
+                                        .filter((p) => p.team === 'Blue')
+                                        .map((p) => (
+                                            <li key={p.id} className={p.id === room.hostId ? 'text-amber-400' : ''}>
+                                                {p.name}
+                                                {p.id === playerId && <span className="ml-1 text-xs text-emerald-400">(You)</span>}
+                                                {p.id === room.hostId && ' (Host)'}
+                                            </li>
+                                        ))}
+                                </ul>
+                            </div>
+                        </div>
                     </div>
 
                     {room.state === 'waiting' && (
-                        <button className="w-full bg-indigo-600 rounded py-2" onClick={() => startRound()}>
-                            Start Round
-                        </button>
+                        <div>
+                            <button className="w-full bg-indigo-600 rounded py-2" onClick={() => startRound()}>
+                                Start Round
+                            </button>
+                        </div>
                     )}
 
                     {isHost && (
@@ -75,11 +130,20 @@ export const App: React.FC = () => {
                             {!hostWord && room.state === 'in-round' && (
                                 <div className="space-y-2">
                                     <h3 className="font-semibold">Enter Secret Word</h3>
-                                    <input
-                                        className="w-full px-3 py-2 rounded bg-slate-800"
-                                        value={word}
-                                        onChange={(e) => setWord(e.target.value)}
-                                    />
+                                    <div className="grid grid-cols-6 gap-2">
+                                        <input
+                                            className="col-span-5 px-3 py-2 rounded bg-slate-800"
+                                            value={word}
+                                            onChange={(e) => setWord(e.target.value)}
+                                        />
+                                        <button
+                                            onClick={() => getRandomWord()}
+                                            className="col-span-1 bg-slate-700 px-3 rounded disabled:opacity-40"
+                                            title="Get Random Word"
+                                        >
+                                            🔀
+                                        </button>
+                                    </div>
                                     <button
                                         disabled={!word.trim()}
                                         className="w-full bg-emerald-600 rounded py-2 disabled:opacity-40"
@@ -117,6 +181,11 @@ export const App: React.FC = () => {
 
                     {room.state === 'in-round' && !isHost && letters.length === 0 && (
                         <div className="italic text-sm text-slate-400">Waiting for host word...</div>
+                    )}
+                    {room.state === 'in-round' && !isHost && letters.length > 0 && (
+                        <button className="w-full bg-indigo-600 rounded py-2" onClick={() => addPoint()}>
+                            Guessed it!
+                        </button>
                     )}
                 </div>
             )}

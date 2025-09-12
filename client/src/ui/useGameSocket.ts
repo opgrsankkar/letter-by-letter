@@ -4,6 +4,8 @@ import { io, Socket } from 'socket.io-client';
 interface PublicPlayer {
     id: string;
     name: string;
+    score: number;
+    team?: 'Red' | 'Blue';
 }
 interface PublicRoomView {
     id: string;
@@ -15,6 +17,7 @@ interface PublicRoomView {
 
 interface ServerToClientEvents {
     room_update: (room: PublicRoomView) => void;
+    new_round_started: (round: number) => void;
     assigned_letters: (letters: string[]) => void;
     host_selected: (hostId: string) => void;
     error_message: (msg: string) => void;
@@ -25,6 +28,8 @@ interface ClientToServerEvents {
     join_room: (roomId: string, playerName: string, cb: (resp: { ok: boolean; playerId?: string }) => void) => void;
     start_round: () => void;
     submit_word: (word: string) => void;
+    add_point: () => void;
+    change_team: () => void;
 }
 
 const SERVER_URL = (import.meta as any).env.VITE_SERVER_URL || window.location.origin.replace(/:\d+$/, ':4000');
@@ -75,6 +80,10 @@ export function useGameSocket() {
                 setMessages((prev) => [...prev, { id: crypto.randomUUID(), text: m }]);
             });
             s.on('host_word', (w) => setHostWord(w));
+            s.on('new_round_started', (round) => {
+                setLetters([]);
+                setHostWord('');
+            });
         }
         return () => {
             socketRef.current?.disconnect();
@@ -140,12 +149,14 @@ export function useGameSocket() {
 
     const startRound = useCallback(() => {
         socketRef.current?.emit('start_round');
-        setLetters([]);
-        setHostWord('');
     }, []);
 
     const submitWord = useCallback((w: string) => {
         socketRef.current?.emit('submit_word', w);
+    }, []);
+
+    const addPoint = useCallback(() => {
+        socketRef.current?.emit('add_point');
     }, []);
 
     const isHost = room?.hostId === playerId;
@@ -160,5 +171,5 @@ export function useGameSocket() {
         setMessages((prev) => prev.filter((m) => m.id !== id));
     }, []);
 
-    return { room, letters, connectCreate, connectJoin, startRound, submitWord, isHost, messages, dismissMessage, hostWord };
+    return { room, letters, connectCreate, connectJoin, startRound, submitWord, addPoint, isHost, playerId, messages, dismissMessage, hostWord };
 }

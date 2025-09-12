@@ -46,17 +46,9 @@ Open the client in the browser and point it to the server URL if different (set 
 5. Verbal play; start another round when ready.
 
 ## Single-Port (Server + Client) Production Build
-1. Build client:
 ```
-cd client && npm install && npm run build
-```
-2. Build server:
-```
-cd ../server && npm install && npm run build
-```
-3. Start server (serves API + static client on same port):
-```
-npm start
+npm run build:all
+npm run start:prod
 ```
 Open http://localhost:4000 (or your LAN IP). The server will serve `client/dist` automatically if present.
 

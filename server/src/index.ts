@@ -12,6 +12,21 @@ const app = express();
 app.use(cors());
 app.get('/health', (_req: express.Request, res: express.Response) => res.json({ status: 'ok' }));
 
+// API endpoint for getting random word
+app.get('/random-word', async (_req: express.Request, res: express.Response) => {
+    //Get from words_list.txt
+    const wordsFilePath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../words_list.txt');
+    fs.readFile(wordsFilePath, 'utf-8', (err, data) => {
+        if (err) {
+            console.error('Error reading words file:', err);
+            return res.status(500).json({ error: 'Failed to read words file' });
+        }
+        const words = data.split('\n').map(word => word.trim()).filter(word => word.length > 0);
+        const randomWord = words[Math.floor(Math.random() * words.length)];
+        res.json({ word: randomWord });
+    });
+});
+
 const httpServer = createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: { origin: '*' },
@@ -27,7 +42,7 @@ function createRoomCode(): string {
 function publicView(room: Room): PublicRoomView {
     return {
         id: room.id,
-        players: room.players.map((p) => ({ id: p.id, name: p.name })),
+        players: room.players.map((p) => ({ id: p.id, name: p.name, score: p.score, team: p.team })),
         state: room.state,
         round: room.round,
         hostId: room.hostId,
@@ -77,7 +92,6 @@ function distributeLetters(room: Room, word: string) {
     }
     // Keep the word in memory until next round so host can still view it; don't broadcast it
     // Allow UI to start a new round while players play verbally
-    room.state = 'waiting';
     broadcastRoom(room.id);
 }
 
@@ -87,8 +101,8 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
     socket.on('create_room', (playerName: string, cb: (resp: { roomId: string; playerId: string }) => void) => {
         let code = createRoomCode();
         while (rooms.has(code)) code = createRoomCode();
-
-        const player: Player = { id: nanoid(8), name: playerName, socketId: socket.id };
+        const team = Math.random() < 0.5 ? 'Red' : 'Blue';
+        const player: Player = { id: nanoid(8), name: playerName, socketId: socket.id, score: 0, team };
         const room: Room = {
             id: code,
             players: [player],
@@ -102,7 +116,11 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
         cb({ roomId: code, playerId: player.id });
         broadcastRoom(code);
     });
-
+    function getTeamWithFewerPlayers(room: Room): 'Red' | 'Blue' {
+        const redCount = room.players.filter((p) => p.team === 'Red').length;
+        const blueCount = room.players.filter((p) => p.team === 'Blue').length;
+        return redCount <= blueCount ? 'Red' : 'Blue';
+    }
     socket.on('join_room', (roomId: string, playerName: string, cb: (resp: { ok: boolean; playerId?: string }) => void) => {
         const room = rooms.get(roomId);
         if (!room) {
@@ -113,14 +131,14 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
             cb({ ok: true, playerId: room.players.find((p) => p.socketId === socket.id)!.id });
             return;
         }
-        const player: Player = { id: nanoid(8), name: playerName, socketId: socket.id };
+        // Find a team with fewer players
+        const player: Player = { id: nanoid(8), name: playerName, socketId: socket.id, score: 0, team: getTeamWithFewerPlayers(room) };
         room.players.push(player);
         socket.join(roomId);
         cb({ ok: true, playerId: player.id });
         broadcastRoom(roomId);
     });
-
-    socket.on('start_round', () => {
+    function start_new_round() {
         // Determine room from socket rooms (skip its own id)
         const roomId = [...socket.rooms].find((r) => rooms.has(r));
         if (!roomId) return;
@@ -134,14 +152,11 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
         room.round += 1;
         room.state = 'in-round';
         room.letters = {};
-        for (const p of room.players) {
-            const sock = io.sockets.sockets.get(p.socketId);
-            sock?.emit('assigned_letters', []); // clear previous letters
-            sock?.emit('host_word', ''); // clear previous host word
-        }
         chooseHost(room);
         broadcastRoom(roomId);
-    });
+        io.to(roomId).emit('new_round_started', room.round);
+    }
+    socket.on('start_round', start_new_round);
 
     socket.on('submit_word', (word: string) => {
         const roomId = [...socket.rooms].find((r) => rooms.has(r));
@@ -164,6 +179,20 @@ io.on('connection', (socket: Socket<ClientToServerEvents, ServerToClientEvents>)
             const hostSock = io.sockets.sockets.get(hostPlayer.socketId);
             hostSock?.emit('host_word', cleaned);
         }
+    });
+
+    socket.on('add_point', () => {
+        const roomId = [...socket.rooms].find((r) => rooms.has(r));
+        if (!roomId) return;
+        const room = rooms.get(roomId)!;
+        const player = room.players.find((p) => p.socketId === socket.id);
+        if (!player) return;
+        if (player.id === room.hostId) {
+            socket.emit('error_message', 'Host cannot add points.');
+            return;
+        }
+        player.score += 1;
+        start_new_round();
     });
 
     socket.on('disconnect', () => {

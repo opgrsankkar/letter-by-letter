@@ -1,6 +1,8 @@
 export type Player = {
     id: string; // internal id
     name: string;
+    score: number;
+    team: 'Red' | 'Blue';
     socketId: string;
 };
 
@@ -22,6 +24,7 @@ export interface ServerToClientEvents {
     host_selected: (hostId: string) => void;
     error_message: (msg: string) => void;
     host_word: (word: string) => void; // sent only to host after distribution
+    new_round_started: (round: number) => void;
 }
 
 export interface ClientToServerEvents {
@@ -29,10 +32,11 @@ export interface ClientToServerEvents {
     join_room: (roomId: string, playerName: string, cb: (resp: { ok: boolean; playerId?: string }) => void) => void;
     start_round: () => void; // server chooses host
     submit_word: (word: string) => void; // host only
+    add_point: () => void; // non-host only
     disconnecting?: () => void;
 }
 
-export type PublicPlayer = { id: string; name: string };
+export type PublicPlayer = { id: string; name: string; score: number; team: 'Red' | 'Blue' };
 export interface PublicRoomView {
     id: string;
     players: PublicPlayer[];
