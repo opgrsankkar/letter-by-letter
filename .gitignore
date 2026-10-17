@@ -4,3 +4,9 @@ dist
 server/dist
 client/dist
 .env
+
+# Scratch review/audit evidence — never committed
+*-full.json
+*-production.json
+IMPLEMENT-TASK.md
+IMPLEMENT-REVIEW.md

@@ -1,0 +1,29 @@
+# Timer for host-cache-cleanup.service (GLOBAL Docker build-cache prune).
+#
+# Installed to /etc/systemd/system/host-cache-cleanup.timer.
+#
+# Schedule
+#   * OnBootSec=15min  : after boot, once the Docker daemon is responsive.
+#   * OnCalendar=daily : one sweep per day.
+#   * Persistent=true  : catch up if the host was powered off at the scheduled
+#                        time (systemd default for missing runs may vary by
+#                        version; Persistent keeps daily behaviour explicit).
+#   * RandomizedDelaySec : avoid a thundering herd on shared hosts.
+#
+# This timer only triggers the one-shot build-cache prune. It never restarts
+# Docker and never removes images/containers/volumes. The prune target is
+# best-effort: it reclaims *unused* build cache and is not a hard size cap
+# while builds are actively running.
+
+[Unit]
+Description=Daily (and boot-delayed) prune of unused Docker build cache
+
+[Timer]
+OnBootSec=15min
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=30min
+Unit=host-cache-cleanup.service
+
+[Install]
+WantedBy=timers.target

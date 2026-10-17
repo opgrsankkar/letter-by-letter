@@ -15,6 +15,37 @@ interface PublicRoomView {
     hostId?: string;
 }
 
+// Server acknowledgement shapes. Failure responses are additive: `ok:false`
+// plus a machine-readable `error` code; success keeps the original fields.
+interface CreateRoomResponse {
+    ok?: boolean;
+    roomId?: string;
+    playerId?: string;
+    error?: string;
+}
+interface JoinRoomResponse {
+    ok: boolean;
+    playerId?: string;
+    error?: string;
+}
+
+// Map server error codes to short, user-facing toast messages. Unknown codes
+// fall back to a generic message so we never surface an empty toast.
+const ACK_ERROR_MESSAGES: Record<string, string> = {
+    invalid_name: 'Please enter a valid name (1-40 characters).',
+    invalid_input: 'Invalid name or room code.',
+    room_not_found: 'Room not found.',
+    room_full: 'That room is full (max 8 players).',
+    already_in_room: 'You are already in a room.',
+    room_capacity_reached: 'The server is at room capacity. Please try again shortly.',
+    rate_limited: 'Too many requests — please slow down.',
+    internal_error: 'Something went wrong. Please try again.',
+};
+function ackErrorMessage(error?: string): string {
+    if (error && ACK_ERROR_MESSAGES[error]) return ACK_ERROR_MESSAGES[error];
+    return 'Something went wrong. Please try again.';
+}
+
 interface ServerToClientEvents {
     room_update: (room: PublicRoomView) => void;
     new_round_started: (round: number) => void;
@@ -24,15 +55,21 @@ interface ServerToClientEvents {
     host_word: (word: string) => void;
 }
 interface ClientToServerEvents {
-    create_room: (playerName: string, cb: (resp: { roomId: string; playerId: string }) => void) => void;
-    join_room: (roomId: string, playerName: string, cb: (resp: { ok: boolean; playerId?: string }) => void) => void;
+    create_room: (playerName: string, cb: (resp: CreateRoomResponse) => void) => void;
+    join_room: (roomId: string, playerName: string, cb: (resp: JoinRoomResponse) => void) => void;
     start_round: () => void;
     submit_word: (word: string) => void;
     add_point: () => void;
     change_team: () => void;
 }
 
-const SERVER_URL = (import.meta as any).env.VITE_SERVER_URL || window.location.origin.replace(/:\d+$/, ':4000');
+// VITE_SERVER_URL wins if set; in prod use the current origin as-is,
+// in dev target the API server on port 4000 at the same host.
+const SERVER_URL =
+    (import.meta as any).env.VITE_SERVER_URL ||
+    ((import.meta as any).env.PROD
+        ? window.location.origin
+        : window.location.origin.replace(/:\d+$/, ':4000'));
 
 export function useGameSocket() {
     const socketRef = useRef<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
@@ -70,15 +107,17 @@ export function useGameSocket() {
         } catch {}
     }, []);
 
+    const pushMessage = useCallback((text: string) => {
+        setMessages((prev) => [...prev, { id: crypto.randomUUID(), text }]);
+    }, []);
+
     useEffect(() => {
         if (!socketRef.current) {
             const s = io(SERVER_URL, { autoConnect: false });
             socketRef.current = s;
             s.on('room_update', (r) => setRoom(r));
             s.on('assigned_letters', (l) => setLetters(l));
-            s.on('error_message', (m) => {
-                setMessages((prev) => [...prev, { id: crypto.randomUUID(), text: m }]);
-            });
+            s.on('error_message', (m) => pushMessage(m));
             s.on('host_word', (w) => setHostWord(w));
             s.on('new_round_started', (round) => {
                 setLetters([]);
@@ -88,7 +127,7 @@ export function useGameSocket() {
         return () => {
             socketRef.current?.disconnect();
         };
-    }, []);
+    }, [pushMessage]);
 
     // Attempt auto rejoin once on mount
     useEffect(() => {
@@ -115,36 +154,39 @@ export function useGameSocket() {
         (name: string) => {
             const s = socketRef.current!;
             if (!s.connected) s.connect();
-            s.emit('create_room', name, ({ playerId }: { playerId: string; roomId: string }) => {
+            s.emit('create_room', name, ({ playerId, error }: CreateRoomResponse) => {
+                if (!playerId) {
+                    // Server rejected the request (invalid name, room cap, rate limit...).
+                    pushMessage(ackErrorMessage(error));
+                    return;
+                }
                 setPlayerId(playerId);
-                // store identity
-                const roomId = room?.id || '';
-                // We get room id via subsequent room_update; delay storing until then
+                // The room id arrives via the subsequent room_update; delay storing
+                // so we never persist an invalid identity.
                 setTimeout(() => {
                     const currentRoom = roomRef.current;
                     if (currentRoom) saveIdentity({ name, roomId: currentRoom.id, playerId });
                 }, 50);
             });
         },
-        [saveIdentity],
+        [saveIdentity, pushMessage],
     );
 
     const connectJoin = useCallback(
         (roomId: string, name: string) => {
             const s = socketRef.current!;
             if (!s.connected) s.connect();
-            s.emit('join_room', roomId, name, ({ ok, playerId }: { ok: boolean; playerId?: string }) => {
-                if (!ok) {
-                    setMessages((prev) => [...prev, { id: crypto.randomUUID(), text: 'Room not found' }]);
+            s.emit('join_room', roomId, name, ({ ok, playerId, error }: JoinRoomResponse) => {
+                if (!ok || !playerId) {
+                    // Surface the real reason (full room, rate limit, bad code...).
+                    pushMessage(ackErrorMessage(error));
                     return;
                 }
-                if (playerId) {
-                    setPlayerId(playerId);
-                    saveIdentity({ name, roomId, playerId });
-                }
+                setPlayerId(playerId);
+                saveIdentity({ name, roomId, playerId });
             });
         },
-        [saveIdentity],
+        [saveIdentity, pushMessage],
     );
 
     const startRound = useCallback(() => {

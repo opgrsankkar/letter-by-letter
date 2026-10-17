@@ -1,0 +1,51 @@
+# Letter by Letter - production compose definition.
+#
+# Deliberately no `deploy.resources` / `mem_limit`: this service is tiny
+# (single Node process, in-memory rooms) and must not be throttled by a tight
+# memory cap that could OOM-kill mid-round.
+#
+# Networking note: the port is published WITHOUT a host IP, so Docker binds it
+# on 0.0.0.0 (i.e. reachable through the docker bridge gateway 172.17.0.1).
+# The existing Caddy reverse proxy targets 172.17.0.1:4000, so do NOT pin the
+# mapping to 127.0.0.1 - that would make it loopback-only and unreachable from
+# the Caddy container. Use LETTER_PORT to run a candidate on a second port.
+#
+# Opt-in overrides (all default to the production values, so plain
+# `docker compose up -d` is unchanged):
+#   LETTER_PORT            host port to publish (candidate: 14000)
+#   LETTER_IMAGE           image name/tag (candidate: letter-by-letter:candidate)
+#   LETTER_CONTAINER_NAME  container name (candidate: letter-by-letter-candidate)
+# IMPORTANT: a candidate MUST also run under a DIFFERENT compose project name
+# via `-p`. The project name scopes the compose labels/network, so reusing the
+# production project would recreate the production service even with a
+# different container_name. Example (candidate alongside production):
+#   LETTER_PORT=14000 LETTER_IMAGE=letter-by-letter:candidate \
+#     LETTER_CONTAINER_NAME=letter-by-letter-candidate \
+#     docker compose -p letter-by-letter-candidate up -d
+services:
+    letter-by-letter:
+        container_name: "${LETTER_CONTAINER_NAME:-letter-by-letter}"
+        image: "${LETTER_IMAGE:-letter-by-letter:local}"
+        build:
+            context: .
+            dockerfile: Dockerfile
+        environment:
+            NODE_ENV: production
+            PORT: "4000"
+        ports:
+            # Production: 4000:4000. Candidate: LETTER_PORT=14000 -> 14000:4000.
+            - "${LETTER_PORT:-4000}:4000"
+        restart: unless-stopped
+        init: true
+        read_only: true
+        tmpfs:
+            - /tmp
+        cap_drop:
+            - ALL
+        security_opt:
+            - no-new-privileges:true
+        logging:
+            driver: json-file
+            options:
+                max-size: "5m"
+                max-file: "2"
