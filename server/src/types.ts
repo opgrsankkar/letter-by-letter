@@ -18,6 +18,21 @@ export interface Room {
     letters: Record<string, string[]>; // playerId -> letters
 }
 
+// Failure responses are additive: successful create/join still return the
+// original `roomId`/`playerId` fields so the existing client keeps working.
+export interface CreateRoomResponse {
+    ok?: boolean;
+    roomId?: string;
+    playerId?: string;
+    error?: string;
+}
+
+export interface JoinRoomResponse {
+    ok: boolean;
+    playerId?: string;
+    error?: string;
+}
+
 export interface ServerToClientEvents {
     room_update: (room: PublicRoomView) => void;
     assigned_letters: (letters: string[]) => void;
@@ -28,10 +43,16 @@ export interface ServerToClientEvents {
 }
 
 export interface ClientToServerEvents {
-    create_room: (playerName: string, cb: (resp: { roomId: string; playerId: string }) => void) => void;
-    join_room: (roomId: string, playerName: string, cb: (resp: { ok: boolean; playerId?: string }) => void) => void;
+    // Arguments are typed `unknown` because they originate from the network and
+    // are validated at runtime before any mutation.
+    create_room: (playerName: unknown, cb: (resp: CreateRoomResponse) => void) => void;
+    join_room: (
+        roomId: unknown,
+        playerName: unknown,
+        cb: (resp: JoinRoomResponse) => void,
+    ) => void;
     start_round: () => void; // server chooses host
-    submit_word: (word: string) => void; // host only
+    submit_word: (word: unknown) => void; // host only
     add_point: () => void; // non-host only
     disconnecting?: () => void;
 }

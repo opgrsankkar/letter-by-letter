@@ -56,6 +56,16 @@ RUN npm ci --omit=dev && npm cache clean --force
 ###############################################################################
 FROM node:${NODE_VERSION} AS runtime
 
+# OCI metadata. All optional: pass with
+#   docker build --build-arg IMAGE_REVISION=$(git rev-parse HEAD) ...
+ARG IMAGE_SOURCE="https://github.com/opgrsankkar/letter-by-letter"
+ARG IMAGE_REVISION="unknown"
+LABEL org.opencontainers.image.title="Letter by Letter" \
+      org.opencontainers.image.source="${IMAGE_SOURCE}" \
+      org.opencontainers.image.revision="${IMAGE_REVISION}" \
+      org.opencontainers.image.description="Multiplayer facilitator app (Express + Socket.IO + React)." \
+      org.opencontainers.image.licenses="UNLICENSED"
+
 ENV NODE_ENV=production \
     PORT=4000
 

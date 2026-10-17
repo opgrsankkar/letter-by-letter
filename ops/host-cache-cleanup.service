@@ -1,0 +1,40 @@
+# Host Docker build-cache garbage collector (GLOBAL scope).
+#
+# Template installed to /etc/systemd/system/. Sister unit: host-cache-cleanup.timer.
+#
+# Scope / safety
+#   * Removes ONLY unused Docker *build cache* (BuildKit/buildx). It does NOT
+#     touch images, containers, volumes, networks, or any application data.
+#   * Runs against the whole Docker daemon (global), which is what keeps the
+#     host disk from filling up from every project that builds images here.
+#   * Does NOT restart docker.service or any container.
+#   * `--all --force` removes ALL unused build cache (no budget/reserved
+#     space); every sweep reclaims everything not referenced by current
+#     builds. The user wants no large build cache for ANY project.
+#
+# The command is intentionally verbose so it is reviewable:
+#   docker buildx prune --all --force
+#
+# Verify the docker CLI path before installing:
+#   command -v docker        # expected: /usr/bin/docker
+#
+# Install (Hermes reviews first):
+#   sudo cp ops/host-cache-cleanup.service /etc/systemd/system/
+#   sudo cp ops/host-cache-cleanup.timer   /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now host-cache-cleanup.timer
+#   systemctl list-timers host-cache-cleanup.timer
+
+[Unit]
+Description=Prune unused Docker build cache (buildx) to bound host disk usage
+Documentation=file:///srv/apps/letter-by-letter/DEPLOYMENT.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# Absolute path to the Docker CLI (verify with `command -v docker`).
+ExecStart=/usr/bin/docker buildx prune --all --force
+# Best-effort: a failure to prune must not be treated as a fatal host fault.
+SuccessExitStatus=0
+# Never restarts Docker; this is a one-shot cache sweep only.

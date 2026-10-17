@@ -67,3 +67,11 @@ smoke-test.mjs
 README.md
 README
 TASK.md
+IMPLEMENT-TASK.md
+IMPLEMENT-REVIEW.md
+DEPENDENCY-COMMANDS.md
+*-full.json
+*-production.json
+
+# --- Host-only ops tooling (systemd templates; never needed in the image) ---
+ops

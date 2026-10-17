@@ -24,6 +24,10 @@ to run on the host (or for a human operator).
 | `compose.yaml` | Production service `letter-by-letter`, image `letter-by-letter:local`, port `4000`, hardening, log rotation. |
 | `homelab-letter-by-letter.service` | systemd oneshot unit template that runs `docker compose up -d` at boot (never builds). |
 | `smoke-test.mjs` | End-to-end HTTP + Socket.IO verification against a running server. |
+| `tests/integration.test.mjs` | Isolated `node:test` + `socket.io-client` suite; forks the compiled server on an ephemeral port with injected limits. |
+| `server/src/validation.ts` | Runtime validation + quota/rate-limit helpers for the socket boundary. |
+| `DEPENDENCY-COMMANDS.md` | Exact npm commands to remove `nanoid`, refresh dependencies, and audit. |
+| `ops/host-cache-cleanup.service`, `ops/host-cache-cleanup.timer` | Host-only systemd templates that prune UNUSED Docker build cache (global scope). |
 | `DEPLOYMENT.md` | This document. |
 
 ### Image contents (runtime stage)
@@ -81,10 +85,21 @@ keeps serving 4000.
 
 ```bash
 cd /srv/apps/letter-by-letter
-LETTER_PORT=14000 docker compose up -d
-docker compose ps
-docker compose logs --tail=50 letter-by-letter
+# Candidate on an alternate port, image tag, container name, AND compose
+# project name so the running production stack/container/image is never touched.
+LETTER_PORT=14000 \
+  LETTER_IMAGE=letter-by-letter:candidate \
+  LETTER_CONTAINER_NAME=letter-by-letter-candidate \
+  docker compose -p letter-by-letter-candidate up -d --build
+docker compose -p letter-by-letter-candidate ps
+docker compose -p letter-by-letter-candidate logs --tail=50 letter-by-letter
 ```
+
+The env overrides are optional and default to the production values, so plain
+`docker compose up -d` is unchanged. A candidate **must** use a different
+`-p` project name: the project name scopes compose labels and the network, so
+reusing the production project would recreate the production service even with
+a different `container_name`.
 
 Then verify:
 
@@ -113,10 +128,14 @@ confirm the UI loads, create a room, join from 2–3 devices/tabs, start a round
 and confirm letter distribution and host word display work. Also confirm the
 proxied path once Caddy points at the chosen port.
 
-Tear the candidate down when done:
+Tear the candidate down when done (same project name and overrides so compose
+targets the candidate):
 
 ```bash
-LETTER_PORT=14000 docker compose down
+LETTER_PORT=14000 \
+  LETTER_IMAGE=letter-by-letter:candidate \
+  LETTER_CONTAINER_NAME=letter-by-letter-candidate \
+  docker compose -p letter-by-letter-candidate down
 ```
 
 ---
@@ -195,8 +214,10 @@ should be performed by the worker.
 - **Hardened by default.** Non-root user, read-only root FS, `tmpfs /tmp`,
   dropped capabilities, `no-new-privileges`, `init: true` for correct signal
   handling (so WebSocket connections close cleanly on stop).
-- **Observable & self-healing.** Built-in HTTP `/health` healthcheck (Node only,
-  no `curl`), `restart: unless-stopped`, and bounded JSON logs (`5m`, 2 files).
+- **Observable.** Built-in HTTP `/health` healthcheck (Node only, no `curl`)
+  reports container health for monitoring; `restart: unless-stopped` restarts
+  the container **only when the process exits**, not on unhealthy health
+  status alone; bounded JSON logs (`5m`, 2 files).
 - **Fast, safe cutover/rollback.** One `systemctl stop/start` swaps implementations.
 - **Verifiable.** `smoke-test.mjs` reproduces a real 3-player round end-to-end.
 
@@ -210,8 +231,9 @@ should be performed by the worker.
 - **Single instance.** No shared session store means the service cannot be
   horizontally scaled — multiple replicas would not share rooms.
 - **Rebuild to update code.** Since boot never builds, any source change requires
-  `docker compose build` + `docker compose restart letter-by-letter` (or a unit
-  restart) before it takes effect.
+  `docker compose build` followed by `docker compose up -d --no-build --force-recreate`
+  (or a unit restart). A plain `docker compose restart` does **not** recreate the
+  container with the newly built image — restart only restarts the existing container.
 - **Public port binding.** Published on `0.0.0.0` (required so Caddy's
   `172.17.0.1:4000` target works). Firewall/Caddy must remain the access control
   boundary; the app itself has permissive CORS (`origin: '*'`).
@@ -234,3 +256,89 @@ should be performed by the worker.
 | Caddy gets 502 | Mapping bound to loopback, or Caddy not targeting `172.17.0.1:4000`. The mapping must stay `0.0.0.0:4000->4000`. |
 | Container restarts at boot only | Image not built before enabling the unit; run `docker compose build` first. |
 | Healthcheck unhealthy but app works | `PORT` env differs from the port the server listens on; compose sets `PORT=4000`. |
+
+---
+
+## 10. Dependency hygiene, tests, and Docker build-cache discipline
+
+### 10.1 Dependencies and audits
+
+`nanoid` was removed from the server (player IDs now use the Node built-in
+`crypto.randomUUID()`, room codes use `crypto.randomInt()`). The exact npm
+commands to remove it, refresh in-range dependencies, and run fresh audits are
+in `DEPENDENCY-COMMANDS.md`. The lockfiles are regenerated **only** by those
+commands and are never hand-edited.
+
+Production audit gate (target `0` findings) — fresh results from this
+disposable worktree:
+
+```bash
+npm --prefix server audit --omit=dev   # 0 vulnerabilities (89 prod deps)
+npm --prefix client audit --omit=dev   # 0 vulnerabilities (20 prod deps)
+```
+
+Remaining **dev-only** graph findings (informational, no forced majors):
+
+- server full tree: **11 high** — all in the dev lint/watch graph
+  (`@typescript-eslint/{eslint-plugin,parser,type-utils,typescript-estree,utils}`,
+  `nodemon` → `chokidar` → `braces`, `fast-glob`/`globby`/`micromatch`).
+  Clearing them requires `@typescript-eslint` 7 → 8 (major) and a
+  `nodemon`/`braces` chain change; deferred, not force-applied.
+- client full tree: **9 total (6 high, 3 moderate)** — `vite` 5 → 8,
+  `tailwindcss` 3 → 4, plus transitive `esbuild` and `postcss-selector-parser`.
+  All dev/build-time only; deferred, not force-applied.
+
+Never run `npm audit fix --force`; record raw output instead.
+
+### 10.2 Automated integration tests
+
+Test prerequisites are explicit and mutate nothing during the test:
+
+```bash
+npm ci --prefix server     # once, on the disposable worktree
+npm ci --prefix client     # provides socket.io-client for the suite
+npm test                   # builds the server, then runs tests/*.test.mjs
+npm run test:integration   # runs tests only (server/dist must be built)
+```
+
+`npm test` runs `npm --prefix server run build` and then
+`node --test tests/*.test.mjs`; it does no implicit installs.
+
+`tests/integration.test.mjs` uses `node:test` + `socket.io-client`. Every test
+**forks the compiled server** (`server/dist/index.js`) on `PORT=0` bound to
+`127.0.0.1` (loopback only) with per-test injected limits, so it never talks to
+production or a public interface. Cleanup disconnects all clients and terminates
+each server (`SIGTERM`, then `SIGKILL`), startup failures/timeouts also kill the
+child, and every test carries a bounded timeout. Coverage: missing/invalid ACKs,
+malformed and oversized inputs, invalid names/codes, host-only `submit_word`,
+the 8-player cap, the global room cap, per-socket membership limits, event rate
+limiting, connection quota, disconnect cleanup/host reassignment, and a full
+valid 3-player round (letter distribution, host word, points, next round).
+
+### 10.3 Docker build cache (host storage budget)
+
+The host is storage-limited: **do not retain large Docker build caches for any
+project**. After any `docker compose build` / `docker build`, prune *unused*
+build cache (images, containers, volumes, and app data are untouched):
+
+```bash
+docker buildx prune --all --force
+```
+
+This removes all unused build cache; cache currently used by active builds is
+not removed. `ops/host-cache-cleanup.service` +
+`ops/host-cache-cleanup.timer` automate a daily (plus boot-delayed) sweep in
+global scope. The unit runs exactly the command above via the absolute path
+`/usr/bin/docker`, never restarts Docker or any container, and removes only
+unused build cache.
+
+Hermes reviews the templates before installing:
+
+```bash
+command -v docker   # expect /usr/bin/docker
+sudo cp ops/host-cache-cleanup.service /etc/systemd/system/
+sudo cp ops/host-cache-cleanup.timer   /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now host-cache-cleanup.timer
+systemctl list-timers host-cache-cleanup.timer
+```

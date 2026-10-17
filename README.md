@@ -58,6 +58,7 @@ From repo root (`package.json` added):
 npm run build:all   # installs & builds client then server
 npm run start:prod  # runs server/dist (after build)
 npm run dev         # runs server dev + client dev concurrently
+npm test            # installs client deps, builds server, runs isolated integration tests
 ```
 
 You do NOT need an extra copy step: the server looks for `client/dist` directly. Only add an automatic copy if you ever restructure the folders or want to decouple artifacts. For now this is simpler and fine.
