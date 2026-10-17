@@ -63,7 +63,13 @@ interface ClientToServerEvents {
     change_team: () => void;
 }
 
-const SERVER_URL = (import.meta as any).env.VITE_SERVER_URL || window.location.origin.replace(/:\d+$/, ':4000');
+// VITE_SERVER_URL wins if set; in prod use the current origin as-is,
+// in dev target the API server on port 4000 at the same host.
+const SERVER_URL =
+    (import.meta as any).env.VITE_SERVER_URL ||
+    ((import.meta as any).env.PROD
+        ? window.location.origin
+        : window.location.origin.replace(/:\d+$/, ':4000'));
 
 export function useGameSocket() {
     const socketRef = useRef<Socket<ServerToClientEvents, ClientToServerEvents> | null>(null);
