@@ -1,0 +1,69 @@
+# Keep the build context small and free of secrets / generated output.
+# Dependency and build directories are restored inside the image by `npm ci`
+# and the build stages, never copied from the host.
+
+# --- VCS ---
+.git
+.gitignore
+.gitattributes
+**/.git
+**/.gitignore
+**/.gitattributes
+
+# --- Dependencies (reinstalled in-image) ---
+node_modules
+**/node_modules
+
+# --- Build output (regenerated in-image) ---
+dist
+**/dist
+build
+**/build
+coverage
+**/coverage
+**/*.tsbuildinfo
+
+# --- Env files / secrets / credentials ---
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+*.crt
+*.p12
+secrets
+**/secrets
+.ssh
+**/.ssh
+id_rsa
+id_ed25519
+
+# --- Logs ---
+*.log
+**/*.log
+logs
+**/logs
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Editor / OS noise ---
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# --- Container / docs artifacts not needed inside the image ---
+Dockerfile
+Dockerfile.*
+.dockerignore
+compose.yaml
+docker-compose.yml
+docker-compose.yaml
+homelab-letter-by-letter.service
+DEPLOYMENT.md
+smoke-test.mjs
+README.md
+README
+TASK.md

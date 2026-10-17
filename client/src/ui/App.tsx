@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import QRCode from 'react-qr-code';
 import { useGameSocket } from './useGameSocket';
 
 export const App: React.FC = () => {
@@ -19,6 +20,15 @@ export const App: React.FC = () => {
         dismissMessage,
         hostWord,
     } = useGameSocket();
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const roomParam = params.get('room');
+        if (roomParam) {
+            setRoomCodeInput(roomParam.toUpperCase());
+        }
+    }, []);
+
     function getRandomWord() {
         // fetch from /random-word endpoint
         // make note during development the server listens on port 4000, while the client is on 5173
@@ -118,10 +128,25 @@ export const App: React.FC = () => {
                     </div>
 
                     {room.state === 'waiting' && (
-                        <div>
+                        <div className="space-y-6">
                             <button className="w-full bg-indigo-600 rounded py-2" onClick={() => startRound()}>
                                 Start Round
                             </button>
+
+                            <div className="flex flex-col items-center gap-2 p-4 bg-white/10 rounded-lg">
+                                <h3 className="text-sm font-semibold text-slate-300">Scan to Join</h3>
+                                <div className="p-2 bg-white rounded">
+                                    <QRCode
+                                        value={`${window.location.origin}/?room=${room.id}`}
+                                        size={150}
+                                        style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                                        viewBox={`0 0 256 256`}
+                                    />
+                                </div>
+                                <div className="text-xs text-slate-400 font-mono mt-1 break-all text-center">
+                                    {window.location.origin}/?room={room.id}
+                                </div>
+                            </div>
                         </div>
                     )}
 

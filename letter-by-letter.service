@@ -1,0 +1,15 @@
+[Unit]
+Description=Letter by Letter Game Server
+After=network.target
+
+[Service]
+Type=simple
+User=sankkar
+WorkingDirectory=/home/sankkar/Projects/letter-by-letter
+ExecStart=/home/sankkar/.nvm/versions/node/v24.13.0/bin/node server/dist/index.js
+Restart=on-failure
+Environment=PORT=4000
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
