@@ -4,24 +4,10 @@
 # (single Node process, in-memory rooms) and must not be throttled by a tight
 # memory cap that could OOM-kill mid-round.
 #
-# Networking note: the port is published only on the docker bridge gateway
-# 172.17.0.1, which is where the Caddy container proxies to. Do not publish on
-# 0.0.0.0 (that exposes the app on the LAN/tailnet without Caddy) or 127.0.0.1
-# (unreachable from the Caddy container). Use LETTER_PORT to run a candidate on
-# a second port.
-#
-# Opt-in overrides (all default to the production values, so plain
-# `docker compose up -d` is unchanged):
-#   LETTER_PORT            host port to publish (candidate: 14000)
-#   LETTER_IMAGE           image name/tag (candidate: letter-by-letter:candidate)
-#   LETTER_CONTAINER_NAME  container name (candidate: letter-by-letter-candidate)
-# IMPORTANT: a candidate MUST also run under a DIFFERENT compose project name
-# via `-p`. The project name scopes the compose labels/network, so reusing the
-# production project would recreate the production service even with a
-# different container_name. Example (candidate alongside production):
-#   LETTER_PORT=14000 LETTER_IMAGE=letter-by-letter:candidate \
-#     LETTER_CONTAINER_NAME=letter-by-letter-candidate \
-#     docker compose -p letter-by-letter-candidate up -d
+# Caddy joins letter-by-letter_default and proxies to letter-by-letter:4000.
+# Production publishes no host port. For an isolated candidate, use a separate
+# compose project (-p) and a temporary override binding a candidate-only port.
+# LETTER_IMAGE and LETTER_CONTAINER_NAME remain available for candidates.
 services:
     letter-by-letter:
         container_name: "${LETTER_CONTAINER_NAME:-letter-by-letter}"
@@ -32,9 +18,6 @@ services:
         environment:
             NODE_ENV: production
             PORT: "4000"
-        ports:
-            # Production: 172.17.0.1:4000. Candidate: LETTER_PORT=14000.
-            - "172.17.0.1:${LETTER_PORT:-4000}:4000"
         restart: unless-stopped
         init: true
         read_only: true
