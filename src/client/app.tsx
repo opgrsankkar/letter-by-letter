@@ -1074,7 +1074,7 @@ function PointsLine({ view, last }: { view: View; last: RoundSummary }) {
   const entries = Object.entries(last.points).filter(([, n]) => n > 0);
   if (entries.length === 0) return null;
   const why = (pid: string, n: number) => {
-    if (pid === last.hostId) return n === POINTS.hostClue ? ' word needed the clue' : ' for their word';
+    if (pid === last.hostId) return n === POINTS.hostClue ? ' clue-giver: the word needed their clue' : ' clue-giver: for choosing the word';
     return ' ' + KIND_LABEL[last.kind ?? 'clue'].toLowerCase();
   };
   return (
