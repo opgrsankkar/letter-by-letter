@@ -752,6 +752,7 @@ button {
 }
 
 .recap {
+  font-size: 0.9rem;
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -794,10 +795,6 @@ button {
   border-color: color-mix(in srgb, var(--tide) 50%, var(--line));
   background: color-mix(in srgb, var(--tide) 10%, var(--card));
 }
-.stage-card.is-live {
-  border-color: color-mix(in srgb, var(--tide) 50%, var(--line));
-  background: color-mix(in srgb, var(--tide) 10%, var(--card));
-}
 
 .btn.is-armed {
   background: var(--bad);
@@ -821,11 +818,6 @@ button {
 }
 .guess-name {
   flex: 1;
-}
-.guess-pts {
-  font-family: var(--display);
-  font-weight: 700;
-  color: var(--ink-2);
 }
 
 .points-line {
@@ -1300,28 +1292,6 @@ button {
   background: color-mix(in srgb, var(--tide) 10%, var(--card));
 }
 
-.kind-options {
-  display: grid;
-  gap: 6px;
-}
-.kind-options button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 48px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  border: 1.5px solid var(--line);
-  background: var(--paper);
-  font-weight: 600;
-  text-align: left;
-}
-.kind-options button.is-on {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--paper);
-}
 
 /* The reveal keeps its main action in normal flow, so it never covers content. */
 .phase-reveal .dock {

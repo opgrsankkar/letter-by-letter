@@ -8,7 +8,8 @@ import {
   cleanWord,
   type PlayerView,
   type RoundSummary,
-  type GuessKind,
+  STAGES,
+  type Stage,
   type View,
 } from '../shared/protocol.ts';
 import { CATEGORIES, drawWords } from '../shared/words.ts';
@@ -185,8 +186,7 @@ function HowToPlay() {
         <li>
           <strong>Letter round:</strong> holders take turns, in the order on screen, hinting at their letters out loud
           without saying them. For an E you might say “my letter is the most common one in English”. The clue-giver stays
-          quiet. Anyone can shout a guess at any time: a correct guess is worth {POINTS.letters} points if you had already
-          hinted your own letters, otherwise {POINTS.clue}.
+          quiet. Anyone can shout a guess at any time: a correct guess is worth {POINTS.letters} points.
         </li>
         <li>
           <strong>Word round:</strong> when everyone has hinted, the clue-giver may clue the whole word. A guess is now worth{' '}
@@ -252,13 +252,6 @@ function Table({ game, view }: { game: Game; view: View }) {
   );
 }
 
-const KIND_LABEL: Record<GuessKind, string> = {
-  letters: 'From letter hints, after their own hint',
-  'before-hint': 'From letter hints, before their own hint',
-  clue: 'After the word clue',
-};
-
-const ordinal = (n: number) => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
 
 /** Fired when something might expose the screen (e.g. opening the room menu). */
 const HIDE_SECRETS = 'lbl:hide-secrets';
@@ -340,7 +333,7 @@ function ScoringStrip() {
   return (
     <ul class="scoring" aria-label="Scoring">
       <li>
-        <strong>+{POINTS.letters}</strong> guessed from letter hints, once you’ve hinted yours
+        <strong>+{POINTS.letters}</strong> guessed from letter hints
       </li>
       <li>
         <strong>+{POINTS.clue}</strong> guessed after the word clue
@@ -735,11 +728,6 @@ function HintOrder({ view }: { view: View }) {
   );
 }
 
-/** What a guess by this player is worth right now. */
-function guessValue(view: View, p: PlayerView): number {
-  if (view.stage !== 'letters') return POINTS.clue;
-  return p.tileCount === 0 || view.hinted.includes(p.id) ? POINTS.letters : POINTS.clue;
-}
 
 function StageBanner({ view, host }: { view: View; host: PlayerView | null }) {
   const { current } = hintQueue(view);
@@ -755,9 +743,6 @@ function StageBanner({ view, host }: { view: View; host: PlayerView | null }) {
         <span class="stage-step">Stage 1</span>
         <div>
           <strong>{mine ? 'Your turn to hint' : current ? `${current.name} is hinting` : 'Everyone has hinted'}</strong>
-          <span>
-            {current ? `Letter hints, in order. Guesses score +${POINTS.letters} once you've hinted.` : `${host?.name ?? 'The clue-giver'} can start the word clue.`}
-          </span>
           <span class="stage-meta">{clueGiver}</span>
         </div>
       </div>
@@ -768,9 +753,11 @@ function StageBanner({ view, host }: { view: View; host: PlayerView | null }) {
       <span class="stage-step">Stage 2</span>
       <div>
         <strong>Word clue</strong>
-        <span>
-          {host ? `${host.name} is cluing the whole word.` : 'The whole word can be clued now.'} Guesses score +{POINTS.clue}.
-        </span>
+        {host && (
+          <span class="stage-meta">
+            Clues: <span class={`name team-${host.team}`}>{host.name}</span>
+          </span>
+        )}
       </div>
     </div>
   );
@@ -827,7 +814,7 @@ function HolderPlay({ game, view, host }: { game: Game; view: View; host: Player
               ))}
             </span>
             <span class="hand-hint" aria-hidden="true">
-              {shown ? 'Tap to hide · hides itself after 8 seconds' : 'Your letters · tap to peek'}
+              {shown ? 'Tap to hide' : 'Tap to peek'}
             </span>
           </button>
           {view.stage === 'letters' &&
@@ -836,26 +823,10 @@ function HolderPlay({ game, view, host }: { game: Game; view: View; host: Player
                 ✓ Hinted{laterHinted ? '' : ' (tap to undo)'}
               </button>
             ) : myTurn ? (
-              <>
-                <p class="your-turn">
-                  Hint at {letters.length === 1 ? 'your letter' : `each of your ${letters.length} letters`} out loud, without saying{' '}
-                  {letters.length === 1 ? 'it' : 'them'}. Then tap:
-                </p>
-                <button class="btn primary big" onClick={() => game.send({ type: 'hinted', done: true })}>
-                  I’ve hinted my letters
-                </button>
-              </>
-            ) : (
-              <p class="muted center">
-                {(() => {
-                  const before = order[myIndex - 1];
-                  const pos = `You’re ${ordinal(myIndex + 1)} of ${order.length}`;
-                  const now = current ? ` ${current.name} is hinting now.` : '';
-                  return `${pos}, right after ${before ? before.name : 'the others'}.${now} Listen, and shout out the word if you get it.`;
-                })()}
-              </p>
-            ))}
-          {view.stage === 'clue' && <p class="muted center">Listen for the word clue, and keep guessing out loud.</p>}
+              <button class="btn primary big" onClick={() => game.send({ type: 'hinted', done: true })}>
+                I’ve hinted my letters
+              </button>
+            ) : null)}
         </section>
       ) : (
         <section class="intro center">
@@ -864,7 +835,7 @@ function HolderPlay({ game, view, host }: { game: Game; view: View; host: Player
             {view.hintOrder.length > 0 && view.hintOrder.length < view.players.length - 1
               ? 'Short word, big table: not everyone gets a letter.'
               : 'You joined after the deal.'}{' '}
-            Listen to the hints and shout out the word. A guess now is worth +{guessValue(view, view.players.find((p) => p.id === view.you)!)}.
+            Listen to the hints and shout out the word.
           </p>
         </section>
       )}
@@ -880,27 +851,22 @@ function HolderPlay({ game, view, host }: { game: Game; view: View; host: Player
 }
 
 function GuessButtons({ view, onPick, highlight }: { view: View; onPick: (id: string | null) => void; highlight?: string | null }) {
-  const live = view.phase === 'playing';
   return (
     <div class="guess-grid">
       {view.players
         .filter((p) => p.id !== view.you)
-        .map((p) => {
-          const value = guessValue(view, p);
-          return (
-            <button
-              key={p.id}
-              class={`guess team-${p.team}${highlight === p.id ? ' is-on' : ''}`}
-              onClick={() => onPick(p.id)}
-              aria-pressed={highlight !== undefined ? highlight === p.id : undefined}
-              aria-label={live ? `${p.name} guessed it, plus ${value}` : `${p.name} guessed it`}
-            >
-              <TeamDot team={p.team} />
-              <span class="guess-name">{p.name}</span>
-              {live && <span class="guess-pts">+{value}</span>}
-            </button>
-          );
-        })}
+        .map((p) => (
+          <button
+            key={p.id}
+            class={`guess team-${p.team}${highlight === p.id ? ' is-on' : ''}`}
+            onClick={() => onPick(p.id)}
+            aria-pressed={highlight !== undefined ? highlight === p.id : undefined}
+            aria-label={`${p.name} guessed it`}
+          >
+            <TeamDot team={p.team} />
+            <span class="guess-name">{p.name}</span>
+          </button>
+        ))}
     </div>
   );
 }
@@ -996,13 +962,7 @@ function HostPlay({ game, view }: { game: Game; view: View }) {
       </div>
 
       <section class="card stack guess-card">
-        <div>
-          <h2 class="display small">Heard the word?</h2>
-          <p class="muted small">
-            Tap whoever said it first. +{POINTS.letters} means they had already hinted; if they guessed before hinting, you
-            can fix it on the next screen.
-          </p>
-        </div>
+        <h2 class="display small">Who said it first?</h2>
         <GuessButtons view={view} onPick={(id) => game.send({ type: 'award', playerId: id })} />
         {confirmNobody ? (
           <div class="row">
@@ -1020,36 +980,18 @@ function HostPlay({ game, view }: { game: Game; view: View }) {
         )}
       </section>
 
-      {view.stage === 'letters' ? (
-        <section class="card stack stage-card">
-          <div>
-            <span class="kicker">Step 1 of 2 · letter hints</span>
-            <h2 class="display small">{current ? 'Stay quiet for now' : 'Everyone has hinted'}</h2>
-            <p class="muted">
-              {current
-                ? `${current.name} is hinting. Holders go in this order:`
-                : `Give them a moment to guess. If it needs your clue, you score +${POINTS.hostClue}.`}
-            </p>
-          </div>
-          {current && <HintOrder view={view} />}
+      {view.stage === 'letters' && current && (
+        <section class="card stack-sm">
+          <span class="field-label">Hinting order</span>
+          <HintOrder view={view} />
           {pending.length > 0 && (
             <ConfirmButton
               class="btn ghost small"
-              label="Someone stuck? Start my clue early"
+              label="Start my word clue early"
               confirm={`Tap again: you’ll only score +${POINTS.hostLetters}`}
               onConfirm={() => game.send({ type: 'unlock' })}
             />
           )}
-        </section>
-      ) : (
-        <section class="card stack stage-card is-live">
-          <div>
-            <span class="kicker">Step 2 of 2 · your turn</span>
-            <h2 class="display small">Clue the whole word</h2>
-            <p class="muted">
-              Guesses are now worth +{POINTS.clue}. You score +{view.early ? POINTS.hostLetters : POINTS.hostClue} when someone gets it.
-            </p>
-          </div>
         </section>
       )}
 
@@ -1090,8 +1032,8 @@ function PointsLine({ view, last }: { view: View; last: RoundSummary }) {
   const entries = Object.entries(last.points).filter(([, n]) => n > 0);
   if (entries.length === 0) return null;
   const why = (pid: string, n: number) => {
-    if (pid === last.hostId) return n === POINTS.hostClue ? ' clue-giver: the word needed their clue' : ' clue-giver: for choosing the word';
-    return ' ' + KIND_LABEL[last.kind ?? 'clue'].toLowerCase();
+    if (pid === last.hostId) return n === POINTS.hostClue ? ' clue-giver, word needed the clue' : ' clue-giver';
+    return last.guessedIn === 'letters' ? ' from letter hints' : ' after the clue';
   };
   return (
     <ul class="points-line">
@@ -1111,24 +1053,22 @@ function PointsLine({ view, last }: { view: View; last: RoundSummary }) {
 
 /** The last clue-giver's correction panel: who guessed, and when. */
 function FixPanel({ view, game, last, onDone }: { view: View; game: Game; last: RoundSummary; onDone: () => void }) {
-  const [kind, setKind] = useState<GuessKind>(last.kind ?? (last.stage === 'clue' ? 'clue' : 'letters'));
+  const [stage, setStage] = useState<Stage>(last.guessedIn ?? last.stage ?? 'clue');
   return (
     <section class="card stack">
-      <h2 class="display small">Who really guessed {last.word}?</h2>
-      <div class="kind-options" role="radiogroup" aria-label="How was it guessed?">
-        {(['letters', 'before-hint', 'clue'] as const).map((k) => (
-          <button key={k} role="radio" aria-checked={kind === k} class={kind === k ? 'is-on' : ''} onClick={() => setKind(k)}>
-            <span>{KIND_LABEL[k]}</span>
-            <strong>+{k === 'letters' ? POINTS.letters : POINTS.clue}</strong>
+      <h2 class="display small">Who said {last.word} first?</h2>
+      <div class="segmented" role="radiogroup" aria-label="When was it guessed?">
+        {STAGES.map((st) => (
+          <button key={st} role="radio" aria-checked={stage === st} class={stage === st ? 'is-on' : ''} onClick={() => setStage(st)}>
+            {st === 'letters' ? `From letter hints · +${POINTS.letters}` : `After the clue · +${POINTS.clue}`}
           </button>
         ))}
       </div>
-      <p class="muted small">Then tap who said it first. +{POINTS.letters} only counts for someone who had hinted their own letters.</p>
       <GuessButtons
         view={view}
         highlight={last.guesserId}
         onPick={(id) => {
-          game.send({ type: 'award', playerId: id, kind });
+          game.send({ type: 'award', playerId: id, guessedIn: stage });
           onDone();
         }}
       />
@@ -1167,23 +1107,19 @@ function Reveal({ game, view }: { game: Game; view: View }) {
         {last.word ? <TileWord word={last.word} stagger={90} fit={{ max: 56, inset: 32 }} /> : <span class="muted">(never chosen)</span>}
         {guesser ? (
           <p class={`verdict team-${guesser.team}`}>
-            <strong>{guesser.name}</strong> got it{' '}
-            {last.kind === 'letters' ? 'from the letters alone!' : last.kind === 'before-hint' ? 'from the letters, before hinting' : 'after the word clue'}
+            <strong>{guesser.name}</strong> got it {last.guessedIn === 'letters' ? 'from the letters alone!' : 'after the word clue'}
           </p>
         ) : (
           <p class="verdict">Nobody got it this time</p>
         )}
         <PointsLine view={view} last={last} />
-        {host && !isLastHost && last.word && (
-          <p class="muted small">Not who said it first? Tell {host.name}: they can fix it until the next word is dealt.</p>
-        )}
       </section>
 
       {isLastHost && last.word && (fixing ? (
         <FixPanel view={view} game={game} last={last} onDone={() => setFixing(false)} />
       ) : (
         <button class="btn ghost fix-btn" onClick={() => setFixing(true)}>
-          Table disagrees? Fix who got it
+          Fix who got it
         </button>
       ))}
 
@@ -1193,7 +1129,6 @@ function Reveal({ game, view }: { game: Game; view: View }) {
             <button class="btn primary big" onClick={() => game.send({ type: 'next' })}>
               Next round
             </button>
-            {isLastHost && <p class="muted small center">You can still fix the credit until the next word is dealt.</p>}
           </>
         ) : (
           <p class="status-line" role="status">
@@ -1203,7 +1138,7 @@ function Reveal({ game, view }: { game: Game; view: View }) {
         {isOwner && (
           <ConfirmButton
             class="btn ghost small"
-            label="That’s the last round? End game & show final scores"
+            label="End game & show final scores"
             confirm="Tap again to end the game for everyone"
             onConfirm={() => game.send({ type: 'end' })}
           />

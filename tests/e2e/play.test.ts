@@ -136,7 +136,7 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
     await host.page.getByRole('button', { name: 'Deal 7 letters' }).waitFor();
     await snap(host, '04-choose');
     await host.page.getByRole('button', { name: 'Deal 7 letters' }).click();
-    await host.page.getByText('Heard the word?').waitFor();
+    await host.page.getByText('Who said it first?').waitFor();
     await snap(host, '05-host-play');
 
     // Holders peek at their letters; together they spell the word.
@@ -164,7 +164,7 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
 
     // Stage 1 -> 2: holders hint, then the clue-giver opens the word clue.
     // Holders hint in the dealt order: exactly one of them has the turn at a time.
-    await host.page.getByText('Stay quiet for now').waitFor();
+    await host.page.getByText('Stay quiet.', { exact: false }).waitFor();
     for (let turn = 0; turn < holders.length; turn += 1) {
       await holders[0].page.waitForTimeout(300);
       const up = [];
@@ -173,19 +173,19 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
       await up[0].page.getByRole('button', { name: 'I’ve hinted my letters' }).click();
       await up[0].page.getByText('✓ Hinted').waitFor();
     }
-    await host.page.getByRole('heading', { name: 'Everyone has hinted' }).waitFor();
+    await host.page.getByText('Everyone has hinted.').waitFor();
     await host.page.getByRole('button', { name: 'Start word clue', exact: true }).click();
-    await host.page.getByRole('heading', { name: 'Clue the whole word' }).waitFor();
+    await host.page.getByText('Your turn: clue the whole word out loud.').waitFor();
     await holders[0].page.getByText('Word clue', { exact: true }).waitFor();
 
     // The clue-giver credits a guesser, then fixes the mis-tap from the reveal.
-    await host.page.getByRole('button', { name: `${holders[1].name} guessed it, plus 1` }).click();
+    await host.page.getByRole('button', { name: `${holders[1].name} guessed it` }).click();
     for (const p of all) {
       await p.page.getByText('The word was').waitFor();
       await p.page.getByText(`${holders[1].name} got it`).waitFor();
     }
     await host.page.getByRole('button', { name: /Fix who got it/ }).click();
-    await host.page.getByRole('radio', { name: /after their own hint/ }).click();
+    await host.page.getByRole('radio', { name: /From letter hints/ }).click();
     await host.page.getByRole('button', { name: `${holders[0].name} guessed it` }).click();
     for (const p of all) await p.page.getByText(`${holders[0].name} got it from the letters alone`).waitFor();
     await snap(host, '07-reveal');
@@ -210,7 +210,7 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
 
     // Until the next word is dealt, the last clue-giver can still fix the credit.
     await host.page.getByRole('button', { name: 'Fix scoring', exact: true }).click();
-    await host.page.getByRole('radio', { name: /After the word clue/ }).click();
+    await host.page.getByRole('radio', { name: /After the clue/ }).click();
     await host.page.getByRole('button', { name: `${holders[1].name} guessed it` }).click();
     for (const p of all) await p.page.locator('.recap', { hasText: `${holders[1].name} +1` }).waitFor();
 

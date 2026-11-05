@@ -268,21 +268,11 @@ export function useGame(): Game {
 const TEAM_LABEL = { ember: 'Ember', tide: 'Tide' } as const;
 
 /**
- * At a real table you notice people sitting down or leaving; on a phone you
- * might not. Announce arrivals and departures, and tell a newcomer their team.
+ * Someone sitting down mid-game is told which team they're on. Everyone else
+ * can see who arrives or leaves at the table, so nobody else is notified.
  */
 function announceArrivals(before: View | null, after: View, toast: (text: string) => void): void {
-  if (!before || before.code !== after.code) {
-    const me = after.players.find((p) => p.id === after.you);
-    if (me && after.phase !== 'lobby') toast(`You joined a game in progress. You're on Team ${TEAM_LABEL[me.team]}.`);
-    return;
-  }
-  const had = new Set(before.players.map((p) => p.id));
-  const has = new Set(after.players.map((p) => p.id));
-  for (const p of after.players) {
-    if (!had.has(p.id) && p.id !== after.you) toast(`${p.name} joined Team ${TEAM_LABEL[p.team]}.`);
-  }
-  for (const p of before.players) {
-    if (!has.has(p.id)) toast(`${p.name} left. Their points stay with Team ${TEAM_LABEL[p.team]}.`);
-  }
+  if (before && before.code === after.code) return;
+  const me = after.players.find((p) => p.id === after.you);
+  if (me && after.phase !== 'lobby') toast(`You joined a game in progress. You're on Team ${TEAM_LABEL[me.team]}.`);
 }
