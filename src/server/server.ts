@@ -287,6 +287,9 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
       case 'unlock':
         room.unlock(playerId);
         break;
+      case 'advance-hint':
+        room.advanceHint(playerId);
+        break;
       case 'end':
         room.end(playerId);
         break;
@@ -403,6 +406,7 @@ function parseMessage(raw: unknown): ClientMessage | null {
     case 'next':
     case 'unlock':
     case 'end':
+    case 'advance-hint':
       return { type: m.type };
     default:
       return null;

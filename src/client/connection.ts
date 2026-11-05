@@ -93,6 +93,7 @@ export function useGame(): Game {
   const wsRef = useRef<WebSocket | null>(null);
   const queue = useRef<ClientMessage[]>([]);
   const resumePending = useRef(false);
+  const lastView = useRef<View | null>(null);
   const [generation, setGeneration] = useState(0);
 
   const toast = (text: string) => {
@@ -172,10 +173,13 @@ export function useGame(): Game {
             if (location.pathname !== `/r/${msg.code}`) history.replaceState(null, '', `/r/${msg.code}`);
             break;
           case 'view':
+            announceArrivals(lastView.current, msg.view, toast);
+            lastView.current = msg.view;
             setView(msg.view);
             setSkew(msg.now - Date.now());
             break;
           case 'left':
+            lastView.current = null;
             writeSeat(null);
             setView(null);
             setResuming(false);
@@ -259,4 +263,26 @@ export function useGame(): Game {
     }),
     [status, view, skew, resuming, toasts],
   );
+}
+
+const TEAM_LABEL = { ember: 'Ember', tide: 'Tide' } as const;
+
+/**
+ * At a real table you notice people sitting down or leaving; on a phone you
+ * might not. Announce arrivals and departures, and tell a newcomer their team.
+ */
+function announceArrivals(before: View | null, after: View, toast: (text: string) => void): void {
+  if (!before || before.code !== after.code) {
+    const me = after.players.find((p) => p.id === after.you);
+    if (me && after.phase !== 'lobby') toast(`You joined a game in progress. You're on Team ${TEAM_LABEL[me.team]}.`);
+    return;
+  }
+  const had = new Set(before.players.map((p) => p.id));
+  const has = new Set(after.players.map((p) => p.id));
+  for (const p of after.players) {
+    if (!had.has(p.id) && p.id !== after.you) toast(`${p.name} joined Team ${TEAM_LABEL[p.team]}.`);
+  }
+  for (const p of before.players) {
+    if (!has.has(p.id)) toast(`${p.name} left. Their points stay with Team ${TEAM_LABEL[p.team]}.`);
+  }
 }

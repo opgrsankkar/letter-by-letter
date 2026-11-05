@@ -419,7 +419,7 @@ test('timer sets a deadline only while playing', () => {
 });
 
 test('the owner runs the room; anyone can switch their own team in the lobby', () => {
-  const { room, players } = roomWith(4);
+  const { room, players, deps } = roomWith(4);
   const [owner, guest] = players;
   assert.equal(room.ownerId(), owner.id);
   const before = room.player(guest.id)!.team;
@@ -436,6 +436,7 @@ test('the owner runs the room; anyone can switch their own team in the lobby', (
 
   // Ownership passes to the next player while the owner is away, and back.
   room.setConnected(owner.id, false);
+  deps.advance(61_000);
   assert.equal(room.ownerId(), guest.id);
   room.setConnected(owner.id, true);
   assert.equal(room.ownerId(), owner.id);
@@ -633,4 +634,44 @@ test('hinting order rotates fairly: nobody is stuck going last', () => {
 test('word deck has no duplicates across categories', () => {
   const all = CATEGORIES.flatMap((c) => c.words);
   assert.equal(new Set(all).size, all.length);
+});
+
+test('the clue-giver can move on a hinter who forgot to tap, but nobody else can', () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'HARMONICA');
+  const order = room.viewFor(host).hintOrder;
+  throwsCode(() => room.advanceHint(order[1]), 'not_allowed');
+  assert.equal(room.advanceHint(host), order[0]);
+  assert.deepEqual(room.pendingHinters(), order.slice(1));
+  room.advanceHint(host);
+  room.advanceHint(host);
+  throwsCode(() => room.advanceHint(host), 'wrong_phase');
+  room.unlock(host);
+  assert.equal(room.viewFor(host).early, false, 'not early: everyone had hinted');
+});
+
+test('ownership survives a brief disconnect, and the owner cannot cut off the clue-giver', () => {
+  const { room, players, deps } = roomWith(4);
+  const [owner] = players;
+  room.setConnected(owner.id, false);
+  deps.advance(30_000);
+  assert.equal(room.ownerId(), owner.id, 'a screen lock does not hand the room over');
+  deps.advance(31_000);
+  assert.notEqual(room.ownerId(), owner.id, 'after a minute away, the next player runs the room');
+  room.setConnected(owner.id, true);
+  assert.equal(room.ownerId(), owner.id);
+
+  room.start(owner.id);
+  const host = room.hostId!;
+  room.deal(host, 'WHEELBARROW');
+  room.award(host, null);
+  const notHost = players.find((p) => p.id !== host)!;
+  throwsCode(() => room.next(notHost.id), 'not_allowed');
+  if (owner.id !== host) throwsCode(() => room.next(owner.id), 'not_allowed');
+  // ...unless the clue-giver has gone.
+  room.setConnected(host, false);
+  room.next(notHost.id);
+  assert.equal(room.phase, 'choosing');
 });
