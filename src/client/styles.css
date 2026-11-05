@@ -1352,3 +1352,21 @@ button {
 .fix-btn {
   width: 100%;
 }
+
+.stage-nudge {
+  margin-top: 4px;
+  font-size: 0.88rem;
+  color: var(--ink-2);
+}
+.your-turn.is-urgent {
+  color: var(--ember);
+  font-size: 1.1rem;
+  animation: nudge 1.4s ease-in-out 3;
+}
+
+.host-status-note {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--ink-2);
+}
