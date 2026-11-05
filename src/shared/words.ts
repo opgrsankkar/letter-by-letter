@@ -68,6 +68,19 @@ export const CATEGORIES: readonly Category[] = [
       'forest', 'planet', 'river', 'storm', 'sunflower', 'tulip', 'breeze', 'snowflake',
     ],
   },
+  {
+    id: 'tricky',
+    label: 'Tricky',
+    // Long or letter-scrambled words that letter hints rarely crack alone:
+    // the clue-giver's word clue usually has to finish the job (+2 for them).
+    words: [
+      'kaleidoscope', 'marshmallow', 'trampoline', 'silhouette', 'rhinoceros', 'saxophone',
+      'labyrinth', 'chandelier', 'xylophone', 'boomerang', 'hieroglyph', 'quicksand',
+      'periscope', 'harmonica', 'thermostat', 'bulldozer', 'sunglasses', 'wheelbarrow',
+      'parachute', 'stethoscope', 'jellyfish', 'dandelion', 'typewriter', 'snorkel',
+      'escalator', 'microscope', 'caterpillar', 'pomegranate', 'skyscraper', 'whirlpool',
+    ],
+  },
 ];
 
 export function drawWords(categoryId: string | null, count: number, rand = Math.random): string[] {

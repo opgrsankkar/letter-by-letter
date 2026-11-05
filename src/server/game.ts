@@ -11,6 +11,7 @@ import {
   type Phase,
   POINTS,
   type RoundSummary,
+  type GuessKind,
   type Stage,
   type Team,
   type View,
@@ -64,6 +65,7 @@ export class Room {
   private departed: Player[] = [];
   private hinted = new Set<string>();
   private hintOrder: string[] = [];
+
   private early = false;
   /** Secret state for the round in progress. */
   private word: string | null = null;
@@ -251,10 +253,12 @@ export class Room {
     if (!word) {
       throw new GameError('bad_word', `Words are ${LIMITS.wordMin}-${LIMITS.wordMax} letters, A to Z only.`);
     }
-    const holders = shuffle(
-      this.connectedPlayers().filter((p) => p.id !== id).map((p) => p.id),
-      this.deps.rand,
-    );
+    // Hinting goes "clockwise" from the clue-giver's left, using join order as
+    // the seating order. As the clue-giver role moves round the table, so does
+    // everyone's turn: over a full cycle each player sits in every position once.
+    const seat = this.players.findIndex((p) => p.id === id);
+    const ring = [...this.players.slice(seat + 1), ...this.players.slice(0, seat)];
+    const holders = ring.filter((p) => p.connected).map((p) => p.id);
     if (holders.length < LIMITS.minPlayers - 1) {
       throw new GameError('too_few_players', 'Need at least two other players here to deal letters.');
     }
@@ -316,19 +320,16 @@ export class Room {
     this.stage = 'clue';
   }
 
-  /** Points a guess by `guesserId` is worth right now. */
-  private guessValue(guesserId: string): number {
-    if (this.stage !== 'letters') return POINTS.clue;
-    const holds = this.holdings.has(guesserId);
-    return !holds || this.hinted.has(guesserId) ? POINTS.letters : POINTS.clue;
-  }
-
   /**
-   * The clue-giver credits whoever guessed (or nobody), ending the round. During
-   * the reveal the same player may correct a mis-tap: the round's points are
-   * re-scored for the new choice, and `stage` may correct when it was guessed.
+   * The clue-giver credits whoever guessed (or nobody), ending the round.
+   *
+   * The phones cannot hear when a guess was spoken, so `kind` lets the
+   * clue-giver say how it came about: a player who shouted the word and only
+   * then tapped "hinted" guessed 'before-hint'. Until the next word is dealt the
+   * same player may correct the guesser and the kind; points are re-scored.
+   * Nobody can be given a full +2 they could not have earned in that round.
    */
-  award(id: string, guesserId: string | null, stage?: Stage): void {
+  award(id: string, guesserId: string | null, kind?: GuessKind): void {
     this.requirePhase(['playing', 'reveal', 'choosing']);
     // Corrections stay open until the next word is dealt.
     if (this.phase !== 'playing') {
@@ -341,19 +342,38 @@ export class Room {
         const p = this.scoreHolder(pid);
         if (p) p.score -= pts;
       }
-      if (stage) last.stage = stage;
       last.guesserId = guesserId;
-      const clue = (last.stage ?? 'clue') === 'clue';
-      // A letter-stage guess is only worth +2 to someone who had hinted then.
-      const full = guesserId !== null && last.eligible.includes(guesserId);
-      const value = clue || !full ? POINTS.clue : POINTS.letters;
-      last.points = this.scoreRound(id, guesserId, value, this.hostValue(clue, last.early));
+      const fallback: GuessKind = last.stage === 'clue' ? 'clue' : 'letters';
+      last.kind = guesserId ? this.settleKind(guesserId, kind ?? last.kind ?? fallback, last.eligible) : null;
+      last.points = this.scoreKind(id, guesserId, last.kind, last.early);
       return;
     }
     this.requireHost(id);
     this.validateGuesser(id, guesserId);
-    const value = guesserId ? this.guessValue(guesserId) : 0;
-    this.finishRound(guesserId, this.scoreRound(id, guesserId, value, this.hostValue(this.stage === 'clue', this.early)));
+    const eligible = this.eligibleNow();
+    let final: GuessKind | null = null;
+    if (guesserId) {
+      // Default from the stage; a word-clue guess cannot predate the word clue.
+      const asked = kind ?? (this.stage === 'clue' ? 'clue' : 'letters');
+      final = this.settleKind(guesserId, asked === 'clue' && this.stage !== 'clue' ? 'letters' : asked, eligible);
+    }
+    this.finishRound(guesserId, this.scoreKind(id, guesserId, final, this.early), final, eligible);
+  }
+
+  /** Who could earn a full letter-stage +2 right now. */
+  private eligibleNow(): string[] {
+    return this.players.filter((p) => !this.holdings.has(p.id) || this.hinted.has(p.id)).map((p) => p.id);
+  }
+
+  /** Never more than the guesser could have earned: no +2 without having hinted. */
+  private settleKind(guesserId: string, kind: GuessKind, eligible: string[]): GuessKind {
+    return kind === 'letters' && !eligible.includes(guesserId) ? 'before-hint' : kind;
+  }
+
+  private scoreKind(hostId: string, guesserId: string | null, kind: GuessKind | null, early: boolean): Record<string, number> {
+    if (!guesserId || !kind) return {};
+    const value = kind === 'letters' ? POINTS.letters : POINTS.clue;
+    return this.scoreRound(hostId, guesserId, value, this.hostValue(kind === 'clue', early));
   }
 
   private hostValue(neededClue: boolean, early: boolean): number {
@@ -496,7 +516,12 @@ export class Room {
     return points;
   }
 
-  private finishRound(guesserId: string | null, points: Record<string, number> = {}): void {
+  private finishRound(
+    guesserId: string | null,
+    points: Record<string, number> = {},
+    kind: GuessKind | null = null,
+    eligible: string[] = this.eligibleNow(),
+  ): void {
     this.last = {
       round: this.round,
       word: this.word ?? '',
@@ -504,7 +529,8 @@ export class Room {
       guesserId,
       stage: this.stage,
       early: this.early,
-      eligible: this.players.filter((p) => !this.holdings.has(p.id) || this.hinted.has(p.id)).map((p) => p.id),
+      eligible,
+      kind,
       points,
       holdings: Object.fromEntries(this.holdings),
     };

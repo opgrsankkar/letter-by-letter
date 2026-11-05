@@ -173,9 +173,9 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
       await up[0].page.getByRole('button', { name: 'I’ve hinted my letters' }).click();
       await up[0].page.getByText('✓ Hinted').waitFor();
     }
-    await host.page.getByText('Everyone has hinted').waitFor();
+    await host.page.getByRole('heading', { name: 'Everyone has hinted' }).waitFor();
     await host.page.getByRole('button', { name: 'Start my word clue' }).click();
-    await host.page.getByText('Clue the whole word').waitFor();
+    await host.page.getByRole('heading', { name: 'Clue the whole word' }).waitFor();
     await holders[0].page.getByText('Word clue', { exact: true }).waitFor();
 
     // The clue-giver credits a guesser, then fixes the mis-tap from the reveal.
@@ -185,7 +185,7 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
       await p.page.getByText(`${holders[1].name} got it`).waitFor();
     }
     await host.page.getByRole('button', { name: /Fix it/ }).click();
-    await host.page.getByRole('radio', { name: /From letters/ }).click();
+    await host.page.getByRole('radio', { name: /after their own hint/ }).click();
     await host.page.getByRole('button', { name: `${holders[0].name} guessed it` }).click();
     for (const p of all) await p.page.getByText(`${holders[0].name} got it from the letters alone`).waitFor();
     await snap(host, '07-reveal');
@@ -210,7 +210,7 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
 
     // Until the next word is dealt, the last clue-giver can still fix the credit.
     await host.page.getByRole('button', { name: 'Fix', exact: true }).click();
-    await host.page.getByRole('radio', { name: /After clue/ }).click();
+    await host.page.getByRole('radio', { name: /After the word clue/ }).click();
     await host.page.getByRole('button', { name: `${holders[1].name} guessed it` }).click();
     for (const p of all) await p.page.locator('.recap', { hasText: `${holders[1].name} +1` }).waitFor();
 

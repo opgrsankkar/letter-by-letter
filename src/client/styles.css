@@ -1281,3 +1281,44 @@ button {
 .fix-btn {
   align-self: center;
 }
+
+/* ------------------------------------------------------------ host status + fix kinds */
+
+.host-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  font-weight: 650;
+}
+.host-status.is-live {
+  border-color: color-mix(in srgb, var(--tide) 50%, var(--line));
+  background: color-mix(in srgb, var(--tide) 10%, var(--card));
+}
+
+.kind-options {
+  display: grid;
+  gap: 6px;
+}
+.kind-options button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--line);
+  background: var(--paper);
+  font-weight: 600;
+  text-align: left;
+}
+.kind-options button.is-on {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}

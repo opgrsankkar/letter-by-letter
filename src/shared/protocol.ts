@@ -24,6 +24,15 @@ export type Phase = 'lobby' | 'choosing' | 'playing' | 'reveal';
  * letters were enough or they opened the word clue before everyone hinted.
  */
 export type Stage = 'letters' | 'clue';
+
+/**
+ * How a winning guess came about, which decides its points:
+ * - 'letters': from letter hints, after the guesser had hinted their own (+2);
+ * - 'before-hint': from letter hints, before they had hinted their own (+1);
+ * - 'clue': after the clue-giver's word clue (+1).
+ */
+export type GuessKind = 'letters' | 'before-hint' | 'clue';
+export const GUESS_KINDS: readonly GuessKind[] = ['letters', 'before-hint', 'clue'];
 export const POINTS = { letters: 2, clue: 1, hostLetters: 1, hostClue: 2 } as const;
 
 export const LIMITS = {
@@ -62,7 +71,7 @@ export type ClientMessage =
    * Clue-giver: who guessed (while playing), or a correction during the reveal,
    * where `stage` may also correct when the word was guessed.
    */
-  | { type: 'award'; playerId: string | null; stage?: Stage }
+  | { type: 'award'; playerId: string | null; kind?: GuessKind }
   | { type: 'next' }
   /** Owner: finish the game and show final scores. */
   | { type: 'end' };
@@ -92,6 +101,8 @@ export interface RoundSummary {
   early: boolean;
   /** Players whose letter-stage guess was worth the full +2 (they had hinted, or held no letters). */
   eligible: string[];
+  /** How the winning guess came about (null when nobody guessed). */
+  kind: GuessKind | null;
   /** Points handed out this round, by player. */
   points: Record<string, number>;
   /** playerId -> letters they held. */
