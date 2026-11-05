@@ -12,6 +12,7 @@ import {
   cleanName,
   type ClientMessage,
   type ServerMessage,
+  type Stage,
 } from '../shared/protocol.ts';
 
 export interface ServerOptions {
@@ -274,11 +275,24 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
         room.pass(playerId);
         break;
       case 'award':
-        room.award(playerId, msg.playerId);
+        room.award(playerId, msg.playerId, msg.stage);
         break;
       case 'next':
         room.next(playerId);
         break;
+      case 'hinted':
+        room.markHinted(playerId, msg.done);
+        break;
+      case 'unlock':
+        room.unlock(playerId);
+        break;
+      case 'end':
+        room.end(playerId);
+        break;
+      default: {
+        const unhandled: never = msg;
+        throw new GameError('bad_request', `Unknown message ${(unhandled as { type: string }).type}`);
+      }
     }
     broadcast(room);
   }
@@ -370,10 +384,15 @@ function parseMessage(raw: unknown): ClientMessage | null {
       return str('word') ? { type: 'deal', word: m.word as string } : null;
     case 'set-timer':
       return typeof m.seconds === 'number' ? { type: 'set-timer', seconds: m.seconds } : null;
-    case 'award':
-      return m.playerId === null || str('playerId')
-        ? { type: 'award', playerId: m.playerId as string | null }
-        : null;
+    case 'hinted':
+      return typeof m.done === 'boolean' ? { type: 'hinted', done: m.done } : null;
+    case 'award': {
+      if (!(m.playerId === null || str('playerId'))) return null;
+      if (m.stage !== undefined && m.stage !== 'letters' && m.stage !== 'clue') return null;
+      return m.stage
+        ? { type: 'award', playerId: m.playerId as string | null, stage: m.stage as Stage }
+        : { type: 'award', playerId: m.playerId as string | null };
+    }
     case 'leave':
     case 'ping':
     case 'switch-team':
@@ -381,6 +400,8 @@ function parseMessage(raw: unknown): ClientMessage | null {
     case 'start':
     case 'pass':
     case 'next':
+    case 'unlock':
+    case 'end':
       return { type: m.type };
     default:
       return null;

@@ -21,9 +21,12 @@ export function Tile(props: {
     <span
       class={`tile tile-${size}${hidden ? ' is-hidden' : ''}${tone ? ` tone-${tone}` : ''}`}
       style={fitSize ? { '--delay': `${delay}ms`, '--size': fitSize } : { '--delay': `${delay}ms` }}
-      aria-label={hidden ? 'hidden letter' : letter}
+      role="img"
+      aria-label={hidden ? 'face-down tile' : letter}
     >
-      <span class="tile-face">{letter}</span>
+      <span class="tile-face" aria-hidden="true">
+        {hidden ? '' : letter}
+      </span>
       <span class="tile-back" aria-hidden="true" />
     </span>
   );
@@ -54,17 +57,36 @@ export function TileWord(props: {
   );
 }
 
+/** Team marker: colour plus the team's initial, so colour is never the only signal. */
 export function TeamDot({ team }: { team: Team }) {
-  return <span class={`team-dot team-${team}`} aria-hidden="true" />;
+  return (
+    <span class={`team-dot team-${team}`} aria-hidden="true">
+      {TEAM_NAME[team][0]}
+    </span>
+  );
 }
 
-export function PlayerChip(props: { player: PlayerView; you?: boolean; host?: boolean; trailing?: ComponentChildren }) {
-  const { player, you, host, trailing } = props;
+export function PlayerChip(props: {
+  player: PlayerView;
+  you?: boolean;
+  host?: boolean;
+  owner?: boolean;
+  trailing?: ComponentChildren;
+}) {
+  const { player, you, host, owner, trailing } = props;
   return (
     <span class={`chip team-${player.team}${player.connected ? '' : ' is-away'}`}>
       <TeamDot team={player.team} />
-      <span class="chip-name">{player.name}</span>
+      <span class="chip-name">
+        {player.name}
+        <span class="sr-only">, team {TEAM_NAME[player.team]}</span>
+      </span>
       {you && <span class="chip-tag">you</span>}
+      {owner && (
+        <span class="chip-tag chip-owner" title="Runs the room">
+          ★<span class="sr-only"> runs the room</span>
+        </span>
+      )}
       {host && <span class="chip-tag chip-host">clues</span>}
       {!player.connected && <span class="chip-tag">away</span>}
       {trailing}
@@ -74,15 +96,19 @@ export function PlayerChip(props: { player: PlayerView; you?: boolean; host?: bo
 
 export function Scoreboard({ scores, compact }: { scores: Record<Team, number>; compact?: boolean }) {
   return (
-    <div class={`scoreboard${compact ? ' is-compact' : ''}`} aria-label={`Ember ${scores.ember}, Tide ${scores.tide}`}>
+    <div
+      class={`scoreboard${compact ? ' is-compact' : ''}`}
+      role="img"
+      aria-label={`Score: Ember ${scores.ember}, Tide ${scores.tide}`}
+    >
       <span class="score team-ember">
-        <span class="score-label">Ember</span>
+        {compact ? <TeamDot team="ember" /> : <span class="score-label">Ember</span>}
         <span class="score-value">{scores.ember}</span>
       </span>
       <span class="score-sep">:</span>
       <span class="score team-tide">
         <span class="score-value">{scores.tide}</span>
-        <span class="score-label">Tide</span>
+        {compact ? <TeamDot team="tide" /> : <span class="score-label">Tide</span>}
       </span>
     </div>
   );
@@ -166,4 +192,32 @@ export function useWakeLock(active: boolean): void {
       void lock?.release().catch(() => {});
     };
   }, [active]);
+}
+
+/**
+ * A button that asks for a second tap instead of a browser confirm() box,
+ * which some in-app browsers block or auto-dismiss.
+ */
+export function ConfirmButton(props: { class?: string; label: string; confirm: string; onConfirm: () => void }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return (
+    <button
+      class={`${props.class ?? 'btn'}${armed ? ' is-armed' : ''}`}
+      onClick={() => {
+        if (armed) {
+          setArmed(false);
+          props.onConfirm();
+        } else {
+          setArmed(true);
+        }
+      }}
+    >
+      {armed ? props.confirm : props.label}
+    </button>
+  );
 }

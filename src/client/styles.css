@@ -412,8 +412,14 @@ button {
   transform: translateY(1px) scale(0.99);
 }
 .btn:disabled {
-  opacity: 0.45;
   cursor: not-allowed;
+  opacity: 0.75;
+}
+.btn.primary:disabled {
+  background: var(--paper-2);
+  border-color: var(--line);
+  color: var(--ink-2);
+  box-shadow: none;
 }
 .btn.primary {
   background: var(--ink);
@@ -529,9 +535,9 @@ button {
   background: var(--paper-2);
 }
 .round-label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--ink-3);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ink-2);
 }
 
 .scoreboard {
@@ -587,11 +593,17 @@ button {
 /* ------------------------------------------------------------ people */
 
 .team-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   flex: none;
+  color: #fff;
+  font-family: var(--ui);
+  font-size: 0.66rem;
+  font-weight: 800;
+  line-height: 1;
 }
 .team-dot.team-ember {
   background: var(--ember);
@@ -679,6 +691,169 @@ button {
   display: none;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.table-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.status-line {
+  margin: 0;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1.5px dashed var(--line);
+  text-align: center;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--card);
+}
+
+.scoring {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: var(--ink-2);
+}
+.scoring strong {
+  display: inline-block;
+  min-width: 2.2em;
+  font-family: var(--display);
+  color: var(--ink);
+}
+
+.final .display {
+  font-size: 2rem;
+}
+.standings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+.standings li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.recap {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--paper-2);
+}
+.recap-word {
+  font-family: var(--display);
+  letter-spacing: 0.08em;
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1.5px solid var(--line);
+  background: var(--card);
+}
+.stage > div {
+  display: flex;
+  flex-direction: column;
+}
+.stage-step {
+  flex: none;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: var(--ink);
+  color: var(--paper);
+}
+.stage-clue {
+  border-color: color-mix(in srgb, var(--tide) 50%, var(--line));
+  background: color-mix(in srgb, var(--tide) 10%, var(--card));
+}
+.stage-card.is-live {
+  border-color: color-mix(in srgb, var(--tide) 50%, var(--line));
+  background: color-mix(in srgb, var(--tide) 10%, var(--card));
+}
+
+.btn.is-armed {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+}
+.recap .kicker {
+  color: var(--ink-2);
+}
+.btn.done {
+  border-color: var(--good);
+  color: var(--good);
+}
+.chip-done {
+  background: color-mix(in srgb, var(--good) 18%, var(--card));
+  color: var(--good);
+}
+
+.guess.is-on {
+  outline: 3px solid var(--ink);
+}
+.guess-name {
+  flex: 1;
+}
+.guess-pts {
+  font-family: var(--display);
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.points-line {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 16px;
+  font-weight: 600;
+}
+.points-line li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.word-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  touch-action: manipulation;
+}
+
 .holders {
   list-style: none;
   padding: 0;
@@ -737,14 +912,8 @@ button {
 }
 .chips-scroll {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  overflow-x: auto;
-  margin: -4px -18px 0;
-  padding: 4px 18px;
-  scrollbar-width: none;
-}
-.chips-scroll::-webkit-scrollbar {
-  display: none;
 }
 .options {
   display: grid;

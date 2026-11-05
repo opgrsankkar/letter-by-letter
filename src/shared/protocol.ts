@@ -10,6 +10,16 @@ export type Team = (typeof TEAMS)[number];
 
 export type Phase = 'lobby' | 'choosing' | 'playing' | 'reveal';
 
+/**
+ * A round is played in two stages. First only the letter holders hint, and a
+ * correct guess is worth POINTS.letters, provided the guesser had already
+ * hinted their own letters (otherwise POINTS.clue: no profiting from hinting
+ * last). When the clue-giver chooses, the word-clue stage starts and guesses
+ * are worth POINTS.clue. The clue-giver earns POINTS.solved for a solved word.
+ */
+export type Stage = 'letters' | 'clue';
+export const POINTS = { letters: 2, clue: 1, solved: 1 } as const;
+
 export const LIMITS = {
   nameMax: 16,
   wordMin: 3,
@@ -38,8 +48,18 @@ export type ClientMessage =
   | { type: 'start' }
   | { type: 'deal'; word: string }
   | { type: 'pass' }
-  | { type: 'award'; playerId: string | null }
-  | { type: 'next' };
+  /** Holder: "I've hinted all my letters". */
+  | { type: 'hinted'; done: boolean }
+  /** Clue-giver: open the word-clue stage early. */
+  | { type: 'unlock' }
+  /**
+   * Clue-giver: who guessed (while playing), or a correction during the reveal,
+   * where `stage` may also correct when the word was guessed.
+   */
+  | { type: 'award'; playerId: string | null; stage?: Stage }
+  | { type: 'next' }
+  /** Owner: finish the game and show final scores. */
+  | { type: 'end' };
 
 // ---------------------------------------------------------------------------
 // Server -> client
@@ -60,6 +80,10 @@ export interface RoundSummary {
   hostId: string;
   /** null when nobody guessed or the round was passed. */
   guesserId: string | null;
+  /** Stage the round had reached when it ended (null if it never started). */
+  stage: Stage | null;
+  /** Points handed out this round, by player. */
+  points: Record<string, number>;
   /** playerId -> letters they held. */
   holdings: Record<string, string[]>;
 }
@@ -70,6 +94,14 @@ export interface View {
   phase: Phase;
   round: number;
   hostId: string | null;
+  /** Runs the room: starts games, sets the timer, shuffles teams, ends the game. */
+  ownerId: string | null;
+  /** True after the owner ends the game, until a new one starts. */
+  ended: boolean;
+  /** Stage of the round in progress (playing phase only). */
+  stage: Stage | null;
+  /** Holders who have finished hinting their letters (playing phase only). */
+  hinted: string[];
   players: PlayerView[];
   scores: Record<Team, number>;
   timerSeconds: number;

@@ -120,35 +120,148 @@ test('a full round: deal, private views, award, reveal, next', () => {
 
   throwsCode(() => room.award(others[0].id, others[1].id), 'not_allowed');
   throwsCode(() => room.award(hostId, hostId), 'bad_request');
+  room.markHinted(others[1].id, true);
   room.award(hostId, others[1].id);
   assert.equal(room.phase, 'reveal');
-  assert.equal(room.player(others[1].id)!.score, 1);
+  // Guessed during the letter stage: 2 for the guesser, 1 for the clue-giver.
+  assert.equal(room.player(others[1].id)!.score, 2);
+  assert.equal(room.player(hostId)!.score, 1);
   const reveal = room.viewFor(others[0].id);
   assert.equal(reveal.last!.word, 'ORANGE');
   assert.equal(reveal.last!.guesserId, others[1].id);
+  assert.equal(reveal.last!.stage, 'letters');
+  assert.deepEqual(reveal.last!.points, { [others[1].id]: 2, [hostId]: 1 });
   assert.equal(reveal.letters, null);
-  assert.equal(reveal.scores[room.player(others[1].id)!.team], 1);
+  assert.equal(reveal.scores.ember + reveal.scores.tide, 3);
 
-  room.next(others[2].id);
+  // Only the outgoing clue-giver (or the owner) moves the table on.
+  const bystander = others.find((p) => p.id !== room.ownerId())!;
+  throwsCode(() => room.next(bystander.id), 'not_allowed');
+  room.next(hostId);
   assert.equal(room.phase, 'choosing');
   assert.equal(room.round, 2);
 });
 
-test('host rotation is fair: everyone hosts once per cycle, no immediate repeats', () => {
+test('two stages: holders hint first; only the clue-giver opens the word clue', () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  const holders = players.filter((p) => p.id !== host);
+  room.deal(host, 'CACTUS');
+  assert.equal(room.viewFor(holders[0].id).stage, 'letters');
+  throwsCode(() => room.markHinted(host, true), 'not_allowed');
+  for (const h of holders) room.markHinted(h.id, true);
+  assert.deepEqual(room.viewFor(host).hinted.sort(), holders.map((h) => h.id).sort());
+  // Everyone hinting does not move the stage on by itself: a guess made in the
+  // letter stage must not be downgraded because someone tapped "done" first.
+  assert.equal(room.stage, 'letters');
+  room.unlock(host);
+  assert.equal(room.stage, 'clue');
+
+  room.award(host, holders[0].id);
+  assert.equal(room.player(holders[0].id)!.score, 1);
+  assert.equal(room.player(host)!.score, 1);
+  assert.equal(room.last!.stage, 'clue');
+  assert.deepEqual(room.viewFor(holders[0].id).hinted, []);
+});
+
+test('a letter-stage guess only earns +2 if the guesser had hinted their own letters', () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  const [early, late] = players.filter((p) => p.id !== host);
+  room.deal(host, 'VOLCANO');
+  room.markHinted(early.id, true);
+  room.award(host, late.id);
+  assert.equal(room.player(late.id)!.score, 1, 'hinting last does not pay');
+  assert.equal(room.last!.stage, 'letters');
+  // The clue-giver can override from the reveal, including the stage.
+  room.award(host, early.id, 'letters');
+  assert.equal(room.player(late.id)!.score, 0);
+  assert.equal(room.player(early.id)!.score, 2);
+  room.award(host, early.id, 'clue');
+  assert.equal(room.player(early.id)!.score, 1);
+  assert.equal(room.last!.stage, 'clue');
+  assert.equal(room.player(host)!.score, 1);
+});
+
+test('the clue-giver can open the word clue early', () => {
+  const { room, players } = roomWith(3);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  const holder = players.find((p) => p.id !== host)!;
+  room.deal(host, 'TEAPOT');
+  throwsCode(() => room.unlock(holder.id), 'not_allowed');
+  room.unlock(host);
+  assert.equal(room.viewFor(holder.id).stage, 'clue');
+});
+
+test('the clue-giver can correct who guessed during the reveal', () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  const [a, b] = players.filter((p) => p.id !== host);
+  room.deal(host, 'BEAVER');
+  room.markHinted(a.id, true);
+  room.award(host, a.id);
+  assert.equal(room.player(a.id)!.score, 2);
+  throwsCode(() => room.award(a.id, b.id), 'not_allowed');
+  room.award(host, b.id);
+  assert.equal(room.player(a.id)!.score, 0);
+  assert.equal(room.player(b.id)!.score, 2);
+  assert.equal(room.player(host)!.score, 1);
+  room.award(host, null);
+  assert.deepEqual(
+    room.players.map((p) => p.score),
+    [0, 0, 0, 0],
+  );
+  assert.equal(room.last!.guesserId, null);
+  // "Nobody" can be corrected too, at the stage the round had reached.
+  room.award(host, b.id);
+  assert.equal(room.player(b.id)!.score, 2);
+  throwsCode(() => room.award(host, host), 'bad_request');
+});
+
+test('host rotation alternates teams and is fair within each team', () => {
   for (let seed = 1; seed <= 25; seed += 1) {
-    const { room, players } = roomWith(5, seed);
-    room.start(players[0].id);
-    const hosts: string[] = [room.hostId!];
-    for (let r = 0; r < 14; r += 1) {
-      room.pass(room.hostId!);
-      hosts.push(room.hostId!);
+    for (const size of [4, 5, 6]) {
+      const { room, players } = roomWith(size, seed);
+      room.start(players[0].id);
+      const hosts: string[] = [room.hostId!];
+      for (let r = 0; r < 23; r += 1) {
+        room.pass(room.hostId!);
+        hosts.push(room.hostId!);
+      }
+      const teamOf = (id: string) => room.player(id)!.team;
+      for (let i = 1; i < hosts.length; i += 1) {
+        assert.notEqual(teamOf(hosts[i]), teamOf(hosts[i - 1]), `seed ${seed} size ${size} turn ${i}`);
+        assert.notEqual(hosts[i], hosts[i - 1]);
+      }
+      // Within a team, everyone goes once before anyone goes twice.
+      for (const team of ['ember', 'tide'] as const) {
+        const members = room.players.filter((p) => p.team === team).length;
+        const turns = hosts.filter((h) => teamOf(h) === team);
+        for (let c = 0; c + members <= turns.length; c += members) {
+          assert.equal(new Set(turns.slice(c, c + members)).size, members, `seed ${seed} ${team}`);
+        }
+      }
+      // With balanced teams, everyone has given clues within the first lap.
+      if (size % 2 === 0) assert.equal(new Set(hosts.slice(0, size)).size, size);
     }
-    for (let cycle = 0; cycle < 3; cycle += 1) {
-      const slice = hosts.slice(cycle * 5, cycle * 5 + 5);
-      assert.equal(new Set(slice).size, 5, `seed ${seed} cycle ${cycle}`);
-    }
-    for (let i = 1; i < hosts.length; i += 1) assert.notEqual(hosts[i], hosts[i - 1]);
   }
+});
+
+test('a one-sided table still rotates', () => {
+  const { room, players } = roomWith(3);
+  for (const p of players) p.team = 'ember';
+  room.start(players[0].id);
+  const hosts = [room.hostId!];
+  for (let r = 0; r < 5; r += 1) {
+    room.pass(room.hostId!);
+    hosts.push(room.hostId!);
+  }
+  for (let i = 1; i < hosts.length; i += 1) assert.notEqual(hosts[i], hosts[i - 1]);
+  assert.equal(new Set(hosts.slice(0, 3)).size, 3);
 });
 
 test('letters are spread evenly across holders', () => {
@@ -245,16 +358,53 @@ test('timer sets a deadline only while playing', () => {
   assert.equal(room.viewFor(players[0].id).deadline, null);
 });
 
-test('switching and shuffling teams only between rounds', () => {
+test('the owner runs the room; anyone can switch their own team in the lobby', () => {
   const { room, players } = roomWith(4);
-  const before = room.player(players[0].id)!.team;
-  room.switchTeam(players[0].id);
-  assert.notEqual(room.player(players[0].id)!.team, before);
-  room.shuffleTeams(players[1].id);
-  const ember = room.players.filter((p) => p.team === 'ember').length;
-  assert.equal(ember, 2);
-  room.start(players[0].id);
-  throwsCode(() => room.switchTeam(players[0].id), 'wrong_phase');
+  const [owner, guest] = players;
+  assert.equal(room.ownerId(), owner.id);
+  const before = room.player(guest.id)!.team;
+  room.switchTeam(guest.id);
+  assert.notEqual(room.player(guest.id)!.team, before);
+  throwsCode(() => room.shuffleTeams(guest.id), 'not_allowed');
+  throwsCode(() => room.setTimer(guest.id, 60), 'not_allowed');
+  throwsCode(() => room.start(guest.id), 'not_allowed');
+  room.shuffleTeams(owner.id);
+  assert.equal(room.players.filter((p) => p.team === 'ember').length, 2);
+  room.start(owner.id);
+  throwsCode(() => room.switchTeam(guest.id), 'wrong_phase');
+  throwsCode(() => room.shuffleTeams(owner.id), 'wrong_phase');
+
+  // Ownership passes to the next player while the owner is away, and back.
+  room.setConnected(owner.id, false);
+  assert.equal(room.ownerId(), guest.id);
+  room.setConnected(owner.id, true);
+  assert.equal(room.ownerId(), owner.id);
+});
+
+test('ending the game shows final scores; a new game starts from zero', () => {
+  const { room, players } = roomWith(3);
+  const [owner] = players;
+  room.start(owner.id);
+  const host = room.hostId!;
+  const guesser = players.find((p) => p.id !== host)!;
+  room.deal(host, 'ACORN');
+  room.markHinted(guesser.id, true);
+  room.award(host, guesser.id);
+  const notOwner = players.find((p) => p.id !== owner.id)!;
+  throwsCode(() => room.end(notOwner.id), 'not_allowed');
+  room.end(owner.id);
+  const v = room.viewFor(guesser.id);
+  assert.equal(v.phase, 'lobby');
+  assert.equal(v.ended, true);
+  assert.equal(v.scores.ember + v.scores.tide, 3);
+  assert.equal(v.last!.word, 'ACORN');
+
+  room.start(owner.id);
+  const fresh = room.viewFor(guesser.id);
+  assert.equal(fresh.ended, false);
+  assert.equal(fresh.round, 1);
+  assert.equal(fresh.last, null);
+  assert.deepEqual(fresh.scores, { ember: 0, tide: 0 });
 });
 
 test('registry: codes, resume, and sweeping', () => {
