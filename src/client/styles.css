@@ -1334,3 +1334,21 @@ button {
   font-size: 0.9rem;
   color: var(--ink-2);
 }
+
+.host-status {
+  flex-wrap: wrap;
+}
+.host-status-text {
+  flex: 1;
+  min-width: 10em;
+}
+.host-status .btn {
+  min-height: 38px;
+}
+.host-status.is-ready {
+  border-color: var(--ember);
+  background: color-mix(in srgb, var(--ember) 14%, var(--card));
+}
+.fix-btn {
+  width: 100%;
+}

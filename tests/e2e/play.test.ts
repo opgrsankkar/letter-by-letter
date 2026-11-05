@@ -174,7 +174,7 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
       await up[0].page.getByText('✓ Hinted').waitFor();
     }
     await host.page.getByRole('heading', { name: 'Everyone has hinted' }).waitFor();
-    await host.page.getByRole('button', { name: 'Start my word clue' }).click();
+    await host.page.getByRole('button', { name: 'Start word clue', exact: true }).click();
     await host.page.getByRole('heading', { name: 'Clue the whole word' }).waitFor();
     await holders[0].page.getByText('Word clue', { exact: true }).waitFor();
 
@@ -184,7 +184,7 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
       await p.page.getByText('The word was').waitFor();
       await p.page.getByText(`${holders[1].name} got it`).waitFor();
     }
-    await host.page.getByRole('button', { name: /Fix it/ }).click();
+    await host.page.getByRole('button', { name: /Fix who got it/ }).click();
     await host.page.getByRole('radio', { name: /after their own hint/ }).click();
     await host.page.getByRole('button', { name: `${holders[0].name} guessed it` }).click();
     for (const p of all) await p.page.getByText(`${holders[0].name} got it from the letters alone`).waitFor();
@@ -197,12 +197,12 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
     await snap(chen, '09-room-sheet');
     await chen.page.keyboard.press('Escape');
 
-    // Only the outgoing clue-giver (or the owner, Asha) gets the Next round button.
+    // Only the outgoing clue-giver gets the Next round button; the owner can end the game.
     for (const p of all) {
       const visible = await p.page.getByRole('button', { name: 'Next round' }).isVisible();
-      assert.equal(visible, p === host || p === asha, `${p.name} next-round button`);
+      assert.equal(visible, p === host, `${p.name} next-round button`);
     }
-    const waiting = all.find((p) => p !== host && p !== asha);
+    const waiting = all.find((p) => p !== host);
     if (waiting) await waiting.page.getByText(`Waiting for ${host.name} to start the next round`).waitFor();
     await host.page.getByRole('button', { name: 'Next round' }).click();
     await Promise.all(all.map((p) => p.page.getByText('Round 2').waitFor()));

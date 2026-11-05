@@ -65,6 +65,8 @@ export type ClientMessage =
   | { type: 'pass' }
   /** Holder: "I've hinted all my letters". */
   | { type: 'hinted'; done: boolean }
+  /** Clue-giver: the current hinter has clearly finished but forgot to tap. */
+  | { type: 'advance-hint' }
   /** Clue-giver: open the word-clue stage early. */
   | { type: 'unlock' }
   /**

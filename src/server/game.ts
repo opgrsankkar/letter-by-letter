@@ -17,6 +17,8 @@ import {
   type View,
 } from '../shared/protocol.ts';
 
+const OWNER_GRACE_MS = 60_000;
+
 export class GameError extends Error {
   code: ErrorCode;
   constructor(code: ErrorCode, message: string) {
@@ -97,8 +99,15 @@ export class Room {
   }
 
   /** The earliest-joined player who is here (or anyone, if nobody is). */
+  /**
+   * The earliest-joined player who is here. A phone that drops out for a
+   * moment (screen lock, flaky wifi) keeps ownership for OWNER_GRACE_MS, so
+   * the room does not change hands mid-action.
+   */
   ownerId(): string | null {
-    return (this.players.find((p) => p.connected) ?? this.players[0])?.id ?? null;
+    const now = this.deps.now();
+    const present = (p: Player) => p.connected || (p.awaySince !== null && now - p.awaySince < OWNER_GRACE_MS);
+    return (this.players.find(present) ?? this.players[0])?.id ?? null;
   }
 
   isEmpty(): boolean {
@@ -310,6 +319,21 @@ export class Room {
   }
 
   /**
+   * The clue-giver moves the turn on for a holder who has said their hints out
+   * loud but forgot to tap, the way a host at a real table would say "OK,
+   * Chen's done". Only ever the player whose turn it is.
+   */
+  advanceHint(id: string): string {
+    this.requirePhase(['playing']);
+    this.requireHost(id);
+    if (this.stage !== 'letters') throw new GameError('wrong_phase', 'Letter hints are already over.');
+    const current = this.pendingHinters()[0];
+    if (!current) throw new GameError('wrong_phase', 'Everyone has already hinted.');
+    this.hinted.add(current);
+    return current;
+  }
+
+  /**
    * The clue-giver starts the word clue. Doing so before every holder has
    * hinted is allowed (someone may be stalling) but caps their own reward.
    */
@@ -404,8 +428,10 @@ export class Room {
   next(id: string): void {
     this.requirePlayer(id);
     this.requirePhase(['reveal']);
+    // Only the outgoing clue-giver moves on, so nobody (owner included) can
+    // cut off a scoring fix. If they have gone, anyone may.
     const lastHost = this.last ? this.player(this.last.hostId) : undefined;
-    if (id !== lastHost?.id && id !== this.ownerId() && lastHost?.connected) {
+    if (id !== lastHost?.id && lastHost?.connected) {
       throw new GameError('not_allowed', `${lastHost.name} starts the next round.`);
     }
     this.beginChoosing(true);
