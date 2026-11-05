@@ -90,6 +90,8 @@ export interface RoundSummary {
   stage: Stage | null;
   /** The clue-giver opened the word clue before every holder had hinted. */
   early: boolean;
+  /** Players whose letter-stage guess was worth the full +2 (they had hinted, or held no letters). */
+  eligible: string[];
   /** Points handed out this round, by player. */
   points: Record<string, number>;
   /** playerId -> letters they held. */

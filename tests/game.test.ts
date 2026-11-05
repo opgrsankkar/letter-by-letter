@@ -494,3 +494,78 @@ test('registry: codes, resume, and sweeping', () => {
   reg.sweep();
   assert.ok(!reg.rooms.has(a.room.code));
 });
+
+// --- Findings from the gpt-6.1-sol review --------------------------------------
+
+test('a short word at a big table: players without letters are not in the hint queue', () => {
+  const { room, players } = roomWith(10);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'OWL');
+  const order = room.viewFor(host).hintOrder;
+  assert.equal(order.length, 3);
+  for (const pid of order) assert.equal(room.viewFor(pid).letters!.length, 1);
+  const spectator = players.find((p) => p.id !== host && !order.includes(p.id))!;
+  assert.equal(room.viewFor(spectator.id).letters, null);
+  hintThrough(room);
+  assert.deepEqual(room.pendingHinters(), []);
+  // Someone with nothing to hint gets the full letter-stage value.
+  room.award(host, spectator.id);
+  assert.equal(room.player(spectator.id)!.score, 2);
+});
+
+test('correcting credit never upgrades a guesser who had not hinted', () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'BADGER');
+  const [first, , last] = room.viewFor(host).hintOrder;
+  room.markHinted(first, true);
+  room.award(host, last);
+  assert.equal(room.player(last)!.score, 1);
+  room.award(host, last, 'letters');
+  assert.equal(room.player(last)!.score, 1, 'still +1: they had not hinted');
+  room.award(host, first, 'letters');
+  assert.equal(room.player(first)!.score, 2);
+  assert.equal(room.player(last)!.score, 0);
+});
+
+test("leaving keeps a player's points with their team, and corrections still balance", () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'COMET');
+  hintThrough(room);
+  const scorer = room.player(players.find((p) => p.id !== host && p.id !== players[0].id)!.id)!;
+  room.award(host, scorer.id);
+  const before = room.scores();
+  room.removePlayer(scorer.id);
+  assert.deepEqual(room.scores(), before, 'team totals unchanged after leaving');
+  // The clue-giver moves the credit to someone else: the leaver's points come off.
+  const other = players.find((p) => p.id !== host && p.id !== scorer.id)!;
+  room.award(host, other.id);
+  const total = room.scores().ember + room.scores().tide;
+  assert.equal(total, 2 + 1, 'one guesser (+2) plus the clue-giver (+1)');
+});
+
+test('letters handed on from someone who never hinted must be hinted again', () => {
+  const { room, players } = roomWith(3);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'TEAPOT');
+  const [a, b] = room.viewFor(host).hintOrder;
+  room.markHinted(a, true);
+  room.removePlayer(b);
+  assert.equal(room.viewFor(a).letters!.length, 6);
+  assert.deepEqual(room.pendingHinters(), [a], 'the new letters still need hinting');
+  // A holder who had hinted leaving does not reset anyone.
+  const r2 = roomWith(4);
+  r2.room.start(r2.players[0].id);
+  const h2 = r2.room.hostId!;
+  r2.room.deal(h2, 'TEAPOT');
+  const [x, y] = r2.room.viewFor(h2).hintOrder;
+  r2.room.markHinted(x, true);
+  r2.room.markHinted(y, true);
+  r2.room.removePlayer(y);
+  assert.ok(!r2.room.pendingHinters().includes(x));
+});

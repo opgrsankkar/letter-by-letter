@@ -457,7 +457,7 @@ function TimerPicker({ game, view }: { game: Game; view: View }) {
 
 function RoomSheet({ open, onClose, game, view }: { open: boolean; onClose: () => void; game: Game; view: View }) {
   const isOwner = view.you === view.ownerId;
-  const inGame = view.phase === 'choosing' || view.phase === 'reveal';
+  const inGame = view.phase !== 'lobby';
   return (
     <Sheet open={open} onClose={onClose} title={`Room ${view.code}`}>
       <div class="stack">
@@ -842,8 +842,13 @@ function HolderPlay({ game, view, host }: { game: Game; view: View; host: Player
         </section>
       ) : (
         <section class="intro center">
-          <h1 class="display small">You sat this one out</h1>
-          <p class="muted">You joined mid-round, so you have no letters. Guess anyway!</p>
+          <h1 class="display small">No letters for you this round</h1>
+          <p class="muted">
+            {view.hintOrder.length > 0 && view.hintOrder.length < view.players.length - 1
+              ? 'Short word, big table: not everyone gets a letter.'
+              : 'You joined after the deal.'}{' '}
+            Listen to the hints and shout out the word. A guess now is worth +{guessValue(view, view.players.find((p) => p.id === view.you)!)}.
+          </p>
         </section>
       )}
       <HostAwayNotice game={game} host={host} />

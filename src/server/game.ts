@@ -60,6 +60,8 @@ export class Room {
   last: RoundSummary | null = null;
   ended = false;
   stage: Stage | null = null;
+  /** Players who left with points; their points still count for their team. */
+  private departed: Player[] = [];
   private hinted = new Set<string>();
   private hintOrder: string[] = [];
   private early = false;
@@ -107,10 +109,16 @@ export class Room {
     return Math.max(...this.players.map((p) => p.awaySince ?? 0));
   }
 
+  /** Team totals, including points earned by players who have since left. */
   scores(): Record<Team, number> {
     const out = { ember: 0, tide: 0 } as Record<Team, number>;
-    for (const p of this.players) out[p.team] += p.score;
+    for (const p of [...this.players, ...this.departed]) out[p.team] += p.score;
     return out;
+  }
+
+  /** A current player, or the record of one who left (for score corrections). */
+  private scoreHolder(id: string): Player | undefined {
+    return this.player(id) ?? this.departed.find((p) => p.id === id);
   }
 
   // -- membership --------------------------------------------------------------
@@ -153,7 +161,10 @@ export class Room {
   removePlayer(id: string): void {
     const idx = this.players.findIndex((p) => p.id === id);
     if (idx < 0) return;
-    this.players.splice(idx, 1);
+    const wasHinted = this.hinted.has(id);
+    const [gone] = this.players.splice(idx, 1);
+    // Their points stay with their team.
+    if (gone.score !== 0) this.departed.push(gone);
     for (const team of TEAMS) this.hostBags[team] = this.hostBags[team].filter((pid) => pid !== id);
     this.hinted.delete(id);
     this.hintOrder = this.hintOrder.filter((pid) => pid !== id);
@@ -163,7 +174,7 @@ export class Room {
         // The clue-giver walked away: show everyone the word and move on.
         this.finishRound(null);
       } else {
-        this.rehome(id);
+        this.rehome(id, wasHinted);
       }
     } else if (this.phase === 'choosing' && id === this.hostId) {
       this.beginChoosing(false);
@@ -207,6 +218,7 @@ export class Room {
         throw new GameError('too_few_players', `Need at least ${LIMITS.minPlayers} players here to play.`);
       }
       for (const p of this.players) p.score = 0;
+      this.departed = [];
       this.round = 0;
       this.last = null;
       this.ended = false;
@@ -247,15 +259,18 @@ export class Room {
       throw new GameError('too_few_players', 'Need at least two other players here to deal letters.');
     }
     const letters = shuffle(word.split(''), this.deps.rand);
-    this.holdings = new Map(holders.map((pid) => [pid, [] as string[]]));
+    // A short word at a big table leaves some players without letters: they
+    // just listen and guess, and are not part of the hinting order.
+    const dealtTo = holders.slice(0, Math.min(holders.length, letters.length));
+    this.holdings = new Map(dealtTo.map((pid) => [pid, [] as string[]]));
     letters.forEach((letter, i) => {
-      this.holdings.get(holders[i % holders.length])!.push(letter);
+      this.holdings.get(dealtTo[i % dealtTo.length])!.push(letter);
     });
     this.word = word;
     this.phase = 'playing';
     this.stage = 'letters';
     this.hinted = new Set();
-    this.hintOrder = [...holders];
+    this.hintOrder = [...dealtTo];
     this.early = false;
     this.deadline = this.timerSeconds > 0 ? this.deps.now() + this.timerSeconds * 1000 : null;
   }
@@ -323,13 +338,16 @@ export class Room {
       }
       this.validateGuesser(id, guesserId);
       for (const [pid, pts] of Object.entries(last.points)) {
-        const p = this.player(pid);
+        const p = this.scoreHolder(pid);
         if (p) p.score -= pts;
       }
       if (stage) last.stage = stage;
       last.guesserId = guesserId;
       const clue = (last.stage ?? 'clue') === 'clue';
-      last.points = this.scoreRound(id, guesserId, clue ? POINTS.clue : POINTS.letters, this.hostValue(clue, last.early));
+      // A letter-stage guess is only worth +2 to someone who had hinted then.
+      const full = guesserId !== null && last.eligible.includes(guesserId);
+      const value = clue || !full ? POINTS.clue : POINTS.letters;
+      last.points = this.scoreRound(id, guesserId, value, this.hostValue(clue, last.early));
       return;
     }
     this.requireHost(id);
@@ -472,7 +490,7 @@ export class Room {
     points[guesserId] = value;
     points[hostId] = (points[hostId] ?? 0) + hostValue;
     for (const [pid, pts] of Object.entries(points)) {
-      const p = this.player(pid);
+      const p = this.scoreHolder(pid);
       if (p) p.score += pts;
     }
     return points;
@@ -486,6 +504,7 @@ export class Room {
       guesserId,
       stage: this.stage,
       early: this.early,
+      eligible: this.players.filter((p) => !this.holdings.has(p.id) || this.hinted.has(p.id)).map((p) => p.id),
       points,
       holdings: Object.fromEntries(this.holdings),
     };
@@ -499,17 +518,23 @@ export class Room {
     this.phase = 'reveal';
   }
 
-  /** Hand a departing holder's letters to whoever (present) holds the fewest. */
-  private rehome(id: string): void {
+  /**
+   * Hand a departing holder's letters on, preferring players who are here and
+   * have not hinted yet, then whoever holds the fewest. If the letters were
+   * never hinted, a recipient who already had to hint again.
+   */
+  private rehome(id: string, wasHinted: boolean): void {
     const orphaned = this.holdings.get(id);
     if (!orphaned) return;
     this.holdings.delete(id);
     const candidates = [...this.holdings.keys()].filter((pid) => this.player(pid)?.connected);
     const pool = candidates.length > 0 ? candidates : [...this.holdings.keys()];
+    const rank = (pid: string) => (this.hinted.has(pid) ? 1000 : 0) + this.holdings.get(pid)!.length;
     for (const letter of orphaned) {
       if (pool.length === 0) break;
-      pool.sort((a, b) => this.holdings.get(a)!.length - this.holdings.get(b)!.length);
+      pool.sort((a, b) => rank(a) - rank(b));
       this.holdings.get(pool[0])!.push(letter);
+      if (!wasHinted && this.stage === 'letters') this.hinted.delete(pool[0]);
     }
   }
 
