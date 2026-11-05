@@ -752,7 +752,7 @@ function StageBanner({ view, host }: { view: View; host: PlayerView | null }) {
     const mine = current?.id === view.you;
     return (
       <div class={`stage stage-letters${mine ? ' is-mine' : ''}`} role="status">
-        <span class="stage-step">1 of 2</span>
+        <span class="stage-step">Stage 1</span>
         <div>
           <strong>{mine ? 'Your turn to hint' : current ? `${current.name} is hinting` : 'Everyone has hinted'}</strong>
           <span>
@@ -765,7 +765,7 @@ function StageBanner({ view, host }: { view: View; host: PlayerView | null }) {
   }
   return (
     <div class="stage stage-clue" role="status">
-      <span class="stage-step">2 of 2</span>
+      <span class="stage-step">Stage 2</span>
       <div>
         <strong>Word clue</strong>
         <span>
@@ -975,7 +975,7 @@ function HostPlay({ game, view }: { game: Game; view: View }) {
       </section>
 
       <div class={`host-status${view.stage === 'clue' ? ' is-live' : !current ? ' is-ready' : ''}`} role="status">
-        <span class="stage-step">{view.stage === 'letters' ? '1 of 2' : '2 of 2'}</span>
+        <span class="stage-step">{view.stage === 'letters' ? 'Stage 1' : 'Stage 2'}</span>
         <span class="host-status-text">
           {view.stage === 'letters'
             ? current
