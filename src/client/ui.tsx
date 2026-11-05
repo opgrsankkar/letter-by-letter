@@ -202,7 +202,7 @@ export function ConfirmButton(props: { class?: string; label: string; confirm: s
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
-    const t = setTimeout(() => setArmed(false), 4000);
+    const t = setTimeout(() => setArmed(false), 8000);
     return () => clearTimeout(t);
   }, [armed]);
   return (
