@@ -252,15 +252,28 @@ test('a full round over the wire keeps the word private until the reveal', async
       assert.ok(!seen.includes('LOBSTER'), 'holders never receive the word while playing');
     });
 
+    // Stage 1: holders say they've hinted; then the clue-giver opens the word clue.
+    for (const h of holders) h.send({ type: 'hinted', done: true });
+    await host.viewWhere((v) => v.hinted.length === holders.length && v.stage === 'letters');
+    holders[0].send({ type: 'unlock' });
+    assert.equal((await holders[0].error('not_allowed')).code, 'not_allowed');
+    host.send({ type: 'unlock' });
+    await host.viewWhere((v) => v.stage === 'clue');
+
     host.send({ type: 'award', playerId: holders[1].id });
     const reveals = await Promise.all(clients.map((c) => c.viewWhere((v) => v.phase === 'reveal')));
     for (const r of reveals) {
       assert.equal(r.last!.word, 'LOBSTER');
       assert.equal(r.last!.guesserId, holders[1].id);
+      assert.equal(r.last!.stage, 'clue');
       assert.equal(r.players.find((p) => p.id === holders[1].id)!.score, 1);
+      assert.equal(r.players.find((p) => p.id === hostId)!.score, 1);
     }
 
-    holders[2].send({ type: 'next' });
+    const bystander = holders.find((h) => h !== asha)!;
+    bystander.send({ type: 'next' });
+    assert.equal((await bystander.error('not_allowed')).code, 'not_allowed');
+    host.send({ type: 'next' });
     const nextRound = await asha.viewWhere((v) => v.phase === 'choosing');
     assert.equal(nextRound.round, 2);
     assert.notEqual(nextRound.hostId, hostId);

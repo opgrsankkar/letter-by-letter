@@ -157,14 +157,30 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
     const mine = await holders[0].page.locator('button.hand .tile-face').allInnerTexts();
     await holders[0].page.reload();
     await holders[0].page.locator('button.hand').waitFor();
+    // Face down again after the refresh, and nothing readable until peeked.
+    assert.deepEqual((await holders[0].page.locator('button.hand .tile-face').allInnerTexts()).join(''), '');
+    await holders[0].page.locator('button.hand').click();
     assert.deepEqual(await holders[0].page.locator('button.hand .tile-face').allInnerTexts(), mine);
 
-    // The clue-giver credits the guesser.
-    await host.page.getByRole('button', { name: holders[1].name, exact: true }).click();
+    // Stage 1 -> 2: holders hint, then the clue-giver opens the word clue.
+    await host.page.getByText('Stay quiet for now').waitFor();
+    await holders[0].page.getByText('Waiting on you and').waitFor();
+    for (const h of holders) await h.page.getByRole('button', { name: 'I’ve hinted all my letters' }).click();
+    await host.page.getByText('Everyone has hinted').waitFor();
+    await host.page.getByRole('button', { name: 'Start my word clue' }).click();
+    await host.page.getByText('Clue the whole word').waitFor();
+    await holders[0].page.getByText('Word clue').waitFor();
+
+    // The clue-giver credits a guesser, then fixes the mis-tap from the reveal.
+    await host.page.getByRole('button', { name: `${holders[1].name} guessed it, plus 1` }).click();
     for (const p of all) {
       await p.page.getByText('The word was').waitFor();
       await p.page.getByText(`${holders[1].name} got it`).waitFor();
     }
+    await host.page.getByRole('button', { name: /Fix it/ }).click();
+    await host.page.getByRole('radio', { name: /From letters/ }).click();
+    await host.page.getByRole('button', { name: `${holders[0].name} guessed it` }).click();
+    for (const p of all) await p.page.getByText(`${holders[0].name} got it from the letters alone`).waitFor();
     await snap(host, '07-reveal');
     await snap(ben, '08-reveal-dark');
 
@@ -174,8 +190,16 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
     await snap(chen, '09-room-sheet');
     await chen.page.keyboard.press('Escape');
 
-    await chen.page.getByRole('button', { name: 'Next round' }).click();
+    // Only the outgoing clue-giver (or the owner, Asha) gets the Next round button.
+    for (const p of all) {
+      const visible = await p.page.getByRole('button', { name: 'Next round' }).isVisible();
+      assert.equal(visible, p === host || p === asha, `${p.name} next-round button`);
+    }
+    const waiting = all.find((p) => p !== host && p !== asha);
+    if (waiting) await waiting.page.getByText(`Waiting for ${host.name} to start the next round`).waitFor();
+    await host.page.getByRole('button', { name: 'Next round' }).click();
     await Promise.all(all.map((p) => p.page.getByText('Round 2').waitFor()));
+    await all.find((p) => p.page.url() && p !== host)!.page.getByText('Last round').waitFor();
 
     // An invite link to a different room wins over the saved seat.
     await chen.page.goto(`${base}/r/WXYA`);
@@ -185,6 +209,15 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
     // ...and going back to the old room's link resumes the seat.
     await chen.page.goto(`${base}/r/${code}`);
     await chen.page.getByText('Round 2').waitFor();
+
+    // The owner ends the game: everyone sees final scores; only the owner can restart.
+    await asha.page.getByRole('button', { name: new RegExp(`Room ${code}`) }).click();
+    await asha.page.getByRole('button', { name: /End game/ }).click();
+    await asha.page.getByRole('button', { name: /Tap again to end/ }).click();
+    for (const p of all) await p.page.getByText('Final scores').waitFor();
+    await snap(asha, '10-final');
+    await asha.page.getByRole('button', { name: 'Start a new game' }).waitFor();
+    assert.equal(await ben.page.getByRole('button', { name: 'Start a new game' }).count(), 0);
 
     for (const p of all) assert.deepEqual(p.problems, [], `${p.name} had browser errors`);
 
