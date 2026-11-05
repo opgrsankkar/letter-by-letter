@@ -45,6 +45,9 @@ before(async () => {
     heartbeatMs: 60_000,
     rateBurst: 40,
     ratePerSecond: 10,
+    maxConnectionsPerIp: 50,
+    maxRoomsPerIpPer10Min: 10,
+    trustProxy: false,
     log: () => {},
   });
   base = `http://127.0.0.1:${server.port}`;
@@ -167,6 +170,15 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
 
     await chen.page.getByRole('button', { name: 'Next round' }).click();
     await Promise.all(all.map((p) => p.page.getByText('Round 2').waitFor()));
+
+    // An invite link to a different room wins over the saved seat.
+    await chen.page.goto(`${base}/r/WXYA`);
+    await chen.page.getByRole('button', { name: 'Join room' }).waitFor();
+    assert.equal(await chen.page.getByLabel('Room code').inputValue(), 'WXYA');
+    assert.ok(chen.page.url().endsWith('/r/WXYA'));
+    // ...and going back to the old room's link resumes the seat.
+    await chen.page.goto(`${base}/r/${code}`);
+    await chen.page.getByText('Round 2').waitFor();
 
     for (const p of all) assert.deepEqual(p.problems, [], `${p.name} had browser errors`);
 

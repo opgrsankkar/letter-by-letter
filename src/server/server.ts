@@ -27,6 +27,11 @@ export interface ServerOptions {
   /** Token bucket per socket: burst size and refill per second. */
   rateBurst: number;
   ratePerSecond: number;
+  /** Per client address: open sockets, and rooms created per 10 minutes. */
+  maxConnectionsPerIp: number;
+  maxRoomsPerIpPer10Min: number;
+  /** Take the client address from the last X-Forwarded-For hop (behind Caddy). */
+  trustProxy: boolean;
   deps?: Partial<Deps>;
   log?: (msg: string) => void;
 }
@@ -65,21 +70,67 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   const sessions = new Map<WebSocket, Session>();
   const socketsByPlayer = new Map<string, WebSocket>();
   const alive = new WeakMap<WebSocket, boolean>();
+  const addressOf = new WeakMap<WebSocket, string>();
+  const connectionsByIp = new Map<string, number>();
+  const createdByIp = new Map<string, number[]>();
+
+  const clientIp = (req: IncomingMessage): string => {
+    if (opts.trustProxy) {
+      const hops = String(req.headers['x-forwarded-for'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+      if (hops.length > 0) return hops[hops.length - 1];
+    }
+    return req.socket.remoteAddress ?? 'unknown';
+  };
+
+  const allowCreate = (ip: string): boolean => {
+    const now = Date.now();
+    const recent = (createdByIp.get(ip) ?? []).filter((t) => now - t < 10 * 60_000);
+    if (recent.length >= opts.maxRoomsPerIpPer10Min) {
+      createdByIp.set(ip, recent);
+      return false;
+    }
+    recent.push(now);
+    createdByIp.set(ip, recent);
+    return true;
+  };
 
   // ---------------------------------------------------------------- HTTP
-  const http = createServer((req, res) => handleHttp(req, res, files));
+  const http = createServer((req, res) => {
+    try {
+      handleHttp(req, res, files);
+    } catch (err) {
+      log(`http error for ${JSON.stringify(req.url)}: ${(err as Error).message}`);
+      if (!res.headersSent) res.writeHead(400, { 'content-type': 'text/plain' });
+      res.end('Bad request');
+    }
+  });
 
   // ----------------------------------------------------------- WebSocket
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 });
 
   http.on('upgrade', (req, socket, head) => {
     const path = (req.url ?? '').split('?')[0];
-    if (path !== '/ws' || !sameOrigin(req) || wss.clients.size >= opts.maxConnections) {
+    const ip = clientIp(req);
+    if (
+      path !== '/ws' ||
+      !sameOrigin(req) ||
+      wss.clients.size >= opts.maxConnections ||
+      (connectionsByIp.get(ip) ?? 0) >= opts.maxConnectionsPerIp
+    ) {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
     }
-    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      addressOf.set(ws, ip);
+      connectionsByIp.set(ip, (connectionsByIp.get(ip) ?? 0) + 1);
+      ws.once('close', () => {
+        const left = (connectionsByIp.get(ip) ?? 1) - 1;
+        if (left <= 0) connectionsByIp.delete(ip);
+        else connectionsByIp.set(ip, left);
+      });
+      wss.emit('connection', ws, req);
+    });
   });
 
   wss.on('connection', (ws: WebSocket) => {
@@ -158,6 +209,9 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   function handleMessage(ws: WebSocket, msg: ClientMessage): void {
     const session = sessions.get(ws);
     switch (msg.type) {
+      case 'ping':
+        send(ws, { type: 'pong' });
+        return;
       case 'create':
       case 'join':
       case 'resume': {
@@ -172,6 +226,9 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
         const name = cleanName(msg.name);
         if (!name) throw new GameError('bad_name', `Names are 1-${LIMITS.nameMax} characters.`);
         if (msg.type === 'create') {
+          if (!allowCreate(addressOf.get(ws) ?? 'unknown')) {
+            throw new GameError('rate_limited', 'Too many new rooms from here. Join an existing one or try later.');
+          }
           const { room, player } = registry.create(name);
           log(`room ${room.code} created`);
           attach(ws, room, player.id, player.token);
@@ -236,6 +293,10 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
   // ---------------------------------------------------- housekeeping
   const sweep = () => {
     for (const room of registry.sweep()) broadcast(room);
+    const now = Date.now();
+    for (const [ip, times] of createdByIp) {
+      if (times.every((t) => now - t >= 10 * 60_000)) createdByIp.delete(ip);
+    }
   };
   const sweepTimer = setInterval(sweep, opts.sweepEveryMs);
   const heartbeat = setInterval(() => {
@@ -314,6 +375,7 @@ function parseMessage(raw: unknown): ClientMessage | null {
         ? { type: 'award', playerId: m.playerId as string | null }
         : null;
     case 'leave':
+    case 'ping':
     case 'switch-team':
     case 'shuffle-teams':
     case 'start':
@@ -328,8 +390,8 @@ function parseMessage(raw: unknown): ClientMessage | null {
 // ------------------------------------------------------------------ static
 
 function handleHttp(req: IncomingMessage, res: ServerResponse, files: Map<string, StaticFile>): void {
-  const url = new URL(req.url ?? '/', 'http://local');
-  const path = url.pathname;
+  // Deliberately not `new URL()`: it throws on paths such as `//`.
+  const path = (req.url ?? '/').split('?')[0].split('#')[0];
 
   if (path === '/health') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });

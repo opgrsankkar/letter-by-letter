@@ -57,7 +57,10 @@ uses `CHROME_PATH`. Screenshots of each phase land in `test-results/`.
 Runtime settings (env): `PORT` (4000), `HOST` (0.0.0.0), `MAX_ROOMS` (200),
 `MAX_CONNECTIONS` (1000), `ABANDON_AFTER_MIN` (15: delete a room nobody is
 connected to), `AWAY_AFTER_MIN` (30: drop a player who has been gone that long),
-`RATE_BURST` / `RATE_PER_SECOND` (20 / 5 messages per socket).
+`RATE_BURST` / `RATE_PER_SECOND` (20 / 5 messages per socket),
+`MAX_CONNECTIONS_PER_IP` (40), `MAX_ROOMS_PER_IP` (10 new rooms per 10 minutes),
+`TRUST_PROXY=1` (take the client address from the last `X-Forwarded-For` hop;
+set only behind a proxy that overwrites it, as Caddy does).
 
 ## Deploy (x1c homelab)
 

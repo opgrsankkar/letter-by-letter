@@ -100,12 +100,20 @@ export class Room {
 
   // -- membership --------------------------------------------------------------
 
+  /**
+   * Seat a new player. Joining under the name of a player who is currently
+   * away takes over that seat (score, team, letters): the usual reason is the
+   * same person arriving from a different browser. The old token stops working.
+   */
   addPlayer(name: string): Player {
+    const same = this.players.find((p) => p.name.toLowerCase() === name.toLowerCase());
+    if (same && !same.connected) {
+      same.token = this.deps.secret();
+      return same;
+    }
+    if (same) throw new GameError('bad_name', 'Someone in this room already has that name.');
     if (this.players.length >= LIMITS.maxPlayers) {
       throw new GameError('room_full', `This room already has ${LIMITS.maxPlayers} players.`);
-    }
-    if (this.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
-      throw new GameError('bad_name', 'Someone in this room already has that name.');
     }
     const player: Player = {
       id: this.deps.secret().slice(0, 12),

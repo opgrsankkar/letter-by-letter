@@ -68,6 +68,14 @@ test('teams stay balanced as players join', () => {
 test('names must be unique in a room and rooms cap at 10', () => {
   const { room } = roomWith(1);
   throwsCode(() => room.addPlayer('p0'), 'bad_name');
+  // ...unless that player is away, in which case the newcomer takes the seat.
+  const original = room.players[0];
+  const oldToken = original.token;
+  room.setConnected(original.id, false);
+  const back = room.addPlayer('P0');
+  assert.equal(back.id, original.id);
+  assert.notEqual(back.token, oldToken);
+  assert.equal(room.byToken(oldToken), undefined);
   for (let i = 1; i < 10; i += 1) room.addPlayer(`X${i}`);
   throwsCode(() => room.addPlayer('Eleven'), 'room_full');
 });

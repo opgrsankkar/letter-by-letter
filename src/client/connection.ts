@@ -66,16 +66,33 @@ export interface Game {
   reclaim: () => void;
 }
 
+/** The room code in a `/r/CODE` invite link, if the page was opened from one. */
+function linkedCode(): string | null {
+  return location.pathname.match(/^\/r\/([^/]+)$/)?.[1]?.toUpperCase() ?? null;
+}
+
+/**
+ * The saved seat, unless the page was opened from a link to a different room:
+ * someone scanning a new room's QR code wants that room, not their old one.
+ */
+function seatToResume(): Seat | null {
+  const seat = readSeat();
+  const link = linkedCode();
+  return seat && (!link || link === seat.code) ? seat : null;
+}
+
+const PROBE_EVERY_MS = 25_000;
+const PROBE_TIMEOUT_MS = 4_000;
+
 export function useGame(): Game {
   const [status, setStatus] = useState<Status>('connecting');
   const [view, setView] = useState<View | null>(null);
   const [skew, setSkew] = useState(0);
-  const [resuming, setResuming] = useState(() => readSeat() !== null);
+  const [resuming, setResuming] = useState(() => seatToResume() !== null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const queue = useRef<ClientMessage[]>([]);
   const resumePending = useRef(false);
-  const retry = useRef({ attempt: 0, timer: 0 as unknown as ReturnType<typeof setTimeout> });
   const [generation, setGeneration] = useState(0);
 
   const toast = (text: string) => {
@@ -86,17 +103,50 @@ export function useGame(): Game {
 
   useEffect(() => {
     let disposed = false;
+    let replaced = false;
+    let attempt = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let probeTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const connect = () => {
+    const scheduleReconnect = () => {
+      clearTimeout(retryTimer);
+      const delay = Math.min(5000, 400 * 2 ** attempt);
+      attempt += 1;
+      retryTimer = setTimeout(connect, delay);
+    };
+
+    // A phone waking from sleep can hold a socket that looks open but is dead.
+    // Ask the server for a pong; if none comes back quickly, start over.
+    const probe = () => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN || probeTimer) return;
+      ws.send(JSON.stringify({ type: 'ping' } satisfies ClientMessage));
+      probeTimer = setTimeout(() => {
+        probeTimer = undefined;
+        if (wsRef.current !== ws) return;
+        wsRef.current = null;
+        ws.close();
+        setStatus('offline');
+        attempt = 0;
+        connect();
+      }, PROBE_TIMEOUT_MS);
+    };
+
+    function connect() {
+      if (disposed || replaced) return;
+      clearTimeout(retryTimer);
+      clearTimeout(probeTimer);
+      probeTimer = undefined;
       const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(`${scheme}://${location.host}/ws`);
       wsRef.current = ws;
       setStatus('connecting');
 
       ws.onopen = () => {
-        retry.current.attempt = 0;
+        if (wsRef.current !== ws) return;
+        attempt = 0;
         setStatus('online');
-        const seat = readSeat();
+        const seat = seatToResume();
         if (seat) {
           resumePending.current = true;
           ws.send(JSON.stringify({ type: 'resume', ...seat } satisfies ClientMessage));
@@ -105,6 +155,9 @@ export function useGame(): Game {
       };
 
       ws.onmessage = (event) => {
+        if (wsRef.current !== ws) return;
+        clearTimeout(probeTimer);
+        probeTimer = undefined;
         let msg: ServerMessage;
         try {
           msg = JSON.parse(String(event.data)) as ServerMessage;
@@ -128,6 +181,8 @@ export function useGame(): Game {
             setResuming(false);
             history.replaceState(null, '', '/');
             break;
+          case 'pong':
+            break;
           case 'error':
             if (resumePending.current) {
               // Our saved seat is gone (server restarted or the room expired).
@@ -144,31 +199,38 @@ export function useGame(): Game {
 
       ws.onclose = (event) => {
         if (disposed || wsRef.current !== ws) return;
+        resumePending.current = false;
         if (event.code === 4001) {
+          replaced = true;
           setStatus('replaced');
           return;
         }
         setStatus('offline');
-        const delay = Math.min(5000, 400 * 2 ** retry.current.attempt);
-        retry.current.attempt += 1;
-        retry.current.timer = setTimeout(connect, delay);
+        scheduleReconnect();
       };
-    };
+    }
 
     connect();
     const onVisible = () => {
-      // Phones freeze background tabs; reconnect immediately when we come back.
+      if (document.visibilityState !== 'visible' || replaced) return;
       const ws = wsRef.current;
-      if (document.visibilityState === 'visible' && ws && ws.readyState > WebSocket.OPEN) {
-        clearTimeout(retry.current.timer);
-        retry.current.attempt = 0;
+      if (!ws || ws.readyState > WebSocket.OPEN) {
+        // Phones freeze background tabs; reconnect straight away on return.
+        attempt = 0;
         connect();
+      } else {
+        probe();
       }
     };
+    const heartbeat = setInterval(() => {
+      if (document.visibilityState === 'visible') probe();
+    }, PROBE_EVERY_MS);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       disposed = true;
-      clearTimeout(retry.current.timer);
+      clearTimeout(retryTimer);
+      clearTimeout(probeTimer);
+      clearInterval(heartbeat);
       document.removeEventListener('visibilitychange', onVisible);
       wsRef.current?.close();
     };
@@ -183,8 +245,15 @@ export function useGame(): Game {
       toasts,
       send: (msg: ClientMessage) => {
         const ws = wsRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-        else queue.current.push(msg);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(msg));
+        } else if (msg.type === 'create' || msg.type === 'join') {
+          // Entering a room is safe to send late. In-game taps are not: they
+          // could land in a later round, so they are dropped while offline.
+          queue.current = [msg];
+        } else {
+          toast('Not connected right now. Try again in a moment.');
+        }
       },
       reclaim: () => setGeneration((g) => g + 1),
     }),

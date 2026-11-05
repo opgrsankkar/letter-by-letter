@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { connect } from 'node:net';
 import WebSocket from 'ws';
 import { startServer, type RunningServer, type ServerOptions } from '../src/server/server.ts';
 import type { ClientMessage, ServerMessage, View } from '../src/shared/protocol.ts';
@@ -33,6 +34,9 @@ async function boot(overrides: Partial<ServerOptions> = {}): Promise<RunningServ
     heartbeatMs: 60_000,
     rateBurst: 50,
     ratePerSecond: 50,
+    maxConnectionsPerIp: 50,
+    maxRoomsPerIpPer10Min: 50,
+    trustProxy: false,
     log: () => {},
     ...overrides,
   });
@@ -143,6 +147,19 @@ async function table(server: { ws: string }, names: string[]) {
   return clients;
 }
 
+/** Send a request line verbatim (fetch would normalise the path). */
+function rawStatus(port: number, path: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const sock = connect(port, '127.0.0.1', () => {
+      sock.write(`GET ${path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n`);
+    });
+    let data = '';
+    sock.on('data', (d) => (data += d.toString()));
+    sock.on('end', () => resolve(Number(data.split(' ')[1])));
+    sock.on('error', reject);
+  });
+}
+
 // ---------------------------------------------------------------------------
 
 test('HTTP: health, static files, client routes and headers', async () => {
@@ -173,6 +190,13 @@ test('HTTP: health, static files, client routes and headers', async () => {
     assert.equal((await fetch(`${s.url}/assets/missing.js`)).status, 404);
     assert.equal((await fetch(`${s.url}/%2e%2e/package.json`)).status, 404);
     assert.equal((await fetch(`${s.url}/`, { method: 'POST' })).status, 405);
+
+    // Paths that `new URL()` chokes on must not take the process down.
+    for (const path of ['//', '///x', '//@', '//:99999', '/\\']) {
+      const status = await rawStatus(s.port, path);
+      assert.ok(status === 200 || status === 404 || status === 400, `${path} -> ${status}`);
+    }
+    assert.equal((await fetch(`${s.url}/health`)).status, 200);
   } finally {
     await s.close();
   }
@@ -359,6 +383,85 @@ test('sweeping drops long-gone players and tells the table', async () => {
     now += 6_000;
     s.sweep();
     await clients[0].viewWhere((v) => v.players.length === 2);
+  } finally {
+    clients.forEach((c) => c.close());
+    await s.close();
+  }
+});
+
+test('per-address limits on sockets and new rooms; proxy address honoured when trusted', async () => {
+  const s = await boot({ maxConnectionsPerIp: 2, maxRoomsPerIpPer10Min: 1 });
+  try {
+    const a = await Client.open(s.ws);
+    const b = await Client.open(s.ws);
+    await assert.rejects(Client.open(s.ws));
+    a.send({ type: 'create', name: 'Ann' });
+    await a.next((m) => m.type === 'joined');
+    b.send({ type: 'create', name: 'Bo' });
+    assert.equal((await b.error()).code, 'rate_limited');
+    a.close();
+    await new Promise((r) => setTimeout(r, 50));
+    const c = await Client.open(s.ws); // a's slot was released
+    c.close();
+    b.close();
+  } finally {
+    await s.close();
+  }
+
+  const p = await boot({ maxConnectionsPerIp: 1, trustProxy: true });
+  try {
+    const one = await Client.open(p.ws, { 'X-Forwarded-For': '203.0.113.9, 198.51.100.1' });
+    const two = await Client.open(p.ws, { 'X-Forwarded-For': '198.51.100.2' });
+    await assert.rejects(Client.open(p.ws, { 'X-Forwarded-For': '198.51.100.2' }));
+    one.close();
+    two.close();
+  } finally {
+    await p.close();
+  }
+});
+
+test('ping is answered without needing a room', async () => {
+  const s = await boot();
+  try {
+    const c = await Client.open(s.ws);
+    c.send({ type: 'ping' });
+    await c.next((m) => m.type === 'pong');
+    c.close();
+  } finally {
+    await s.close();
+  }
+});
+
+test('joining under an away player\'s name takes over their seat', async () => {
+  const s = await boot();
+  const clients = await table(s, ['Ann', 'Bo', 'Cy']);
+  try {
+    clients[0].send({ type: 'start' });
+    const v = await clients[0].viewWhere((v) => v.phase === 'choosing');
+    const host = clients.find((c) => c.id === v.hostId)!;
+    host.send({ type: 'deal', word: 'HAMSTER' });
+    const holder = clients.find((c) => c !== host)!;
+    const hand = (await holder.viewWhere((v) => v.phase === 'playing')).letters;
+    const name = ['Ann', 'Bo', 'Cy'][clients.indexOf(holder)];
+
+    // While they are here, the name is taken.
+    const dup = await Client.open(s.ws);
+    dup.send({ type: 'join', code: holder.code, name });
+    assert.equal((await dup.error()).code, 'bad_name');
+
+    holder.close();
+    await host.viewWhere((v) => v.players.some((p) => p.id === holder.id && !p.connected));
+    dup.send({ type: 'join', code: holder.code, name: name.toUpperCase() });
+    const joined = (await dup.next((m) => m.type === 'joined')) as Extract<ServerMessage, { type: 'joined' }>;
+    assert.equal(joined.playerId, holder.id);
+    assert.notEqual(joined.token, holder.token);
+    assert.deepEqual((await dup.viewWhere((v) => v.phase === 'playing')).letters, hand);
+
+    const stale = await Client.open(s.ws);
+    stale.send({ type: 'resume', code: holder.code, token: holder.token });
+    assert.equal((await stale.error()).code, 'not_found');
+    dup.close();
+    stale.close();
   } finally {
     clients.forEach((c) => c.close());
     await s.close();

@@ -29,6 +29,9 @@ const server = await startServer({
   heartbeatMs: 25_000,
   rateBurst: int('RATE_BURST', 20, 1),
   ratePerSecond: int('RATE_PER_SECOND', 5, 1),
+  maxConnectionsPerIp: int('MAX_CONNECTIONS_PER_IP', 40, 1),
+  maxRoomsPerIpPer10Min: int('MAX_ROOMS_PER_IP', 10, 1),
+  trustProxy: process.env.TRUST_PROXY === '1',
 });
 
 if (typeof process.send === 'function') process.send({ type: 'listening', port: server.port });

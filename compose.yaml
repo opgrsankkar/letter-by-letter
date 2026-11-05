@@ -14,6 +14,9 @@ services:
         environment:
             NODE_ENV: production
             PORT: "4000"
+            # Only Caddy can reach this container, so its X-Forwarded-For is
+            # the real client address (used for per-address limits).
+            TRUST_PROXY: "1"
         restart: unless-stopped
         init: true
         read_only: true

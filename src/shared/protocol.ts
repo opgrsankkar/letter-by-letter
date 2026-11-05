@@ -31,6 +31,7 @@ export type ClientMessage =
   | { type: 'join'; code: string; name: string }
   | { type: 'resume'; code: string; token: string }
   | { type: 'leave' }
+  | { type: 'ping' }
   | { type: 'switch-team' }
   | { type: 'shuffle-teams' }
   | { type: 'set-timer'; seconds: number }
@@ -102,6 +103,7 @@ export type ServerMessage =
   /** `now` is the server clock, so clients can correct for skew when showing the timer. */
   | { type: 'view'; view: View; now: number }
   | { type: 'left' }
+  | { type: 'pong' }
   | { type: 'error'; code: ErrorCode; message: string };
 
 // ---------------------------------------------------------------------------
