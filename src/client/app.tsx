@@ -1017,6 +1017,9 @@ function HostPlay({ game, view }: { game: Game; view: View }) {
               Start word clue
             </button>
           ))}
+        {view.stage === 'letters' && !current && (
+          <span class="host-status-note">Tap it before you say your clue, so guesses score right.</span>
+        )}
       </div>
 
       <section class="card stack guess-card">

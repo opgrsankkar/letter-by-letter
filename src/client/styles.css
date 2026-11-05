@@ -1363,3 +1363,10 @@ button {
   font-size: 1.1rem;
   animation: nudge 1.4s ease-in-out 3;
 }
+
+.host-status-note {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--ink-2);
+}
