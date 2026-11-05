@@ -61,6 +61,8 @@ export class Room {
   ended = false;
   stage: Stage | null = null;
   private hinted = new Set<string>();
+  private hintOrder: string[] = [];
+  private early = false;
   /** Secret state for the round in progress. */
   private word: string | null = null;
   private holdings = new Map<string, string[]>();
@@ -154,6 +156,7 @@ export class Room {
     this.players.splice(idx, 1);
     for (const team of TEAMS) this.hostBags[team] = this.hostBags[team].filter((pid) => pid !== id);
     this.hinted.delete(id);
+    this.hintOrder = this.hintOrder.filter((pid) => pid !== id);
 
     if (this.phase === 'playing') {
       if (id === this.hostId) {
@@ -215,7 +218,11 @@ export class Room {
   /** Owner finishes the game: back to the lobby with final scores on show. */
   end(id: string): void {
     this.requireOwner(id);
-    this.requirePhase(['choosing', 'reveal']);
+    this.requirePhase(['choosing', 'playing', 'reveal']);
+    // A round in progress is abandoned without points.
+    this.stage = null;
+    this.hinted = new Set();
+    this.hintOrder = [];
     this.word = null;
     this.holdings = new Map();
     this.deadline = null;
@@ -248,23 +255,49 @@ export class Room {
     this.phase = 'playing';
     this.stage = 'letters';
     this.hinted = new Set();
+    this.hintOrder = [...holders];
+    this.early = false;
     this.deadline = this.timerSeconds > 0 ? this.deps.now() + this.timerSeconds * 1000 : null;
   }
 
-  /** A letter holder says they have finished hinting at their letters. */
+  /** Holders still to hint, in order, skipping anyone who is away. */
+  pendingHinters(): string[] {
+    return this.hintOrder.filter((pid) => this.player(pid)?.connected && !this.hinted.has(pid));
+  }
+
+  /**
+   * A letter holder says they have finished hinting. Holders go in the dealt
+   * order, so nobody can sit back and hear everyone else's letters first.
+   */
   markHinted(id: string, done: boolean): void {
     this.requirePhase(['playing']);
     this.requirePlayer(id);
     if (!this.holdings.has(id)) throw new GameError('not_allowed', 'Only letter holders hint at letters.');
     if (this.stage !== 'letters') return;
-    if (done) this.hinted.add(id);
-    else this.hinted.delete(id);
+    if (done) {
+      const next = this.pendingHinters()[0];
+      if (next !== id && !this.hinted.has(id)) {
+        throw new GameError('not_allowed', `Wait for ${this.player(next ?? '')?.name ?? 'your turn'} to hint first.`);
+      }
+      this.hinted.add(id);
+    } else {
+      // Undo only while nobody after you has gone.
+      const mine = this.hintOrder.indexOf(id);
+      if (this.hintOrder.slice(mine + 1).some((pid) => this.hinted.has(pid))) {
+        throw new GameError('not_allowed', 'The next player has already hinted.');
+      }
+      this.hinted.delete(id);
+    }
   }
 
-  /** The clue-giver opens the word-clue stage without waiting for everyone. */
+  /**
+   * The clue-giver starts the word clue. Doing so before every holder has
+   * hinted is allowed (someone may be stalling) but caps their own reward.
+   */
   unlock(id: string): void {
     this.requirePhase(['playing']);
     this.requireHost(id);
+    if (this.stage === 'letters' && this.pendingHinters().length > 0) this.early = true;
     this.stage = 'clue';
   }
 
@@ -281,11 +314,12 @@ export class Room {
    * re-scored for the new choice, and `stage` may correct when it was guessed.
    */
   award(id: string, guesserId: string | null, stage?: Stage): void {
-    this.requirePhase(['playing', 'reveal']);
-    if (this.phase === 'reveal') {
+    this.requirePhase(['playing', 'reveal', 'choosing']);
+    // Corrections stay open until the next word is dealt.
+    if (this.phase !== 'playing') {
       const last = this.last;
       if (!last || last.hostId !== id || !last.word) {
-        throw new GameError('not_allowed', 'Only the clue-giver can change who guessed.');
+        throw new GameError('not_allowed', 'Only the last clue-giver can change who guessed.');
       }
       this.validateGuesser(id, guesserId);
       for (const [pid, pts] of Object.entries(last.points)) {
@@ -294,14 +328,18 @@ export class Room {
       }
       if (stage) last.stage = stage;
       last.guesserId = guesserId;
-      const value = (last.stage ?? 'clue') === 'letters' ? POINTS.letters : POINTS.clue;
-      last.points = this.scoreRound(id, guesserId, value);
+      const clue = (last.stage ?? 'clue') === 'clue';
+      last.points = this.scoreRound(id, guesserId, clue ? POINTS.clue : POINTS.letters, this.hostValue(clue, last.early));
       return;
     }
     this.requireHost(id);
     this.validateGuesser(id, guesserId);
     const value = guesserId ? this.guessValue(guesserId) : 0;
-    this.finishRound(guesserId, this.scoreRound(id, guesserId, value));
+    this.finishRound(guesserId, this.scoreRound(id, guesserId, value, this.hostValue(this.stage === 'clue', this.early)));
+  }
+
+  private hostValue(neededClue: boolean, early: boolean): number {
+    return neededClue && !early ? POINTS.hostClue : POINTS.hostLetters;
   }
 
   /**
@@ -351,6 +389,8 @@ export class Room {
       ended: this.ended,
       stage: playing ? this.stage : null,
       hinted: playing ? [...this.hinted] : [],
+      hintOrder: playing ? [...this.hintOrder] : [],
+      early: playing ? this.early : false,
       players: this.players.map((p) => ({
         id: p.id,
         name: p.name,
@@ -377,6 +417,8 @@ export class Room {
     this.deadline = null;
     this.stage = null;
     this.hinted = new Set();
+    this.hintOrder = [];
+    this.early = false;
     if (this.connectedPlayers().length < LIMITS.minPlayers) {
       if (this.phase === 'lobby') {
         throw new GameError('too_few_players', `Need at least ${LIMITS.minPlayers} players here to play.`);
@@ -424,11 +466,11 @@ export class Room {
   }
 
   /** Apply (and return) the points for a solved word. */
-  private scoreRound(hostId: string, guesserId: string | null, value: number): Record<string, number> {
+  private scoreRound(hostId: string, guesserId: string | null, value: number, hostValue: number): Record<string, number> {
     const points: Record<string, number> = {};
     if (guesserId === null) return points;
     points[guesserId] = value;
-    points[hostId] = (points[hostId] ?? 0) + POINTS.solved;
+    points[hostId] = (points[hostId] ?? 0) + hostValue;
     for (const [pid, pts] of Object.entries(points)) {
       const p = this.player(pid);
       if (p) p.score += pts;
@@ -443,6 +485,7 @@ export class Room {
       hostId: this.hostId ?? '',
       guesserId,
       stage: this.stage,
+      early: this.early,
       points,
       holdings: Object.fromEntries(this.holdings),
     };
@@ -451,6 +494,8 @@ export class Room {
     this.deadline = null;
     this.stage = null;
     this.hinted = new Set();
+    this.hintOrder = [];
+    this.early = false;
     this.phase = 'reveal';
   }
 
