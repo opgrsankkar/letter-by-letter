@@ -63,8 +63,6 @@ export class Room {
   last: RoundSummary | null = null;
   ended = false;
   stage: Stage | null = null;
-  /** When the table last moved on (new turn, new stage, new phase). */
-  private movedAt = 0;
   /** Players who left with points; their points still count for their team. */
   private departed: Player[] = [];
   private hinted = new Set<string>();
@@ -283,7 +281,6 @@ export class Room {
     });
     this.word = word;
     this.phase = 'playing';
-    this.movedAt = this.deps.now();
     this.stage = 'letters';
     this.hinted = new Set();
     this.hintOrder = [...dealtTo];
@@ -311,7 +308,6 @@ export class Room {
         throw new GameError('not_allowed', `Wait for ${this.player(next ?? '')?.name ?? 'your turn'} to hint first.`);
       }
       this.hinted.add(id);
-      this.movedAt = this.deps.now();
     } else {
       // Undo only while nobody after you has gone.
       const mine = this.hintOrder.indexOf(id);
@@ -334,7 +330,6 @@ export class Room {
     const current = this.pendingHinters()[0];
     if (!current) throw new GameError('wrong_phase', 'Everyone has already hinted.');
     this.hinted.add(current);
-    this.movedAt = this.deps.now();
     return current;
   }
 
@@ -347,7 +342,6 @@ export class Room {
     this.requireHost(id);
     if (this.stage === 'letters' && this.pendingHinters().length > 0) this.early = true;
     this.stage = 'clue';
-    this.movedAt = this.deps.now();
   }
 
   /**
@@ -461,7 +455,6 @@ export class Room {
       hinted: playing ? [...this.hinted] : [],
       hintOrder: playing ? [...this.hintOrder] : [],
       early: playing ? this.early : false,
-      waitingSince: this.movedAt,
       players: this.players.map((p) => ({
         id: p.id,
         name: p.name,
@@ -501,7 +494,6 @@ export class Room {
     if (newRound || this.round === 0) this.round += 1;
     this.hostId = this.drawHost();
     this.phase = 'choosing';
-    this.movedAt = this.deps.now();
   }
 
   private drawHost(): string {
@@ -576,7 +568,6 @@ export class Room {
     this.hintOrder = [];
     this.early = false;
     this.phase = 'reveal';
-    this.movedAt = this.deps.now();
   }
 
   /**
