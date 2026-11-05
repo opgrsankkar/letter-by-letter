@@ -7,12 +7,10 @@
 # (`docker compose up -d` only), so boots stay fast and reproducible.
 #   cd /srv/apps/letter-by-letter && docker compose build
 #
-# The original /etc/systemd/system/letter-by-letter.service is left untouched
-# so rollback can simply re-enable it.
 
 [Unit]
 Description=Letter by Letter (Docker Compose)
-Documentation=file:///srv/apps/letter-by-letter/DEPLOYMENT.md
+Documentation=file:///srv/apps/letter-by-letter/README.md
 Requires=docker.service
 After=network-online.target docker.service
 Wants=network-online.target

@@ -1,13 +1,9 @@
-# Letter by Letter - production compose definition.
+# Letter by Letter, production.
 #
-# Deliberately no `deploy.resources` / `mem_limit`: this service is tiny
-# (single Node process, in-memory rooms) and must not be throttled by a tight
-# memory cap that could OOM-kill mid-round.
-#
-# Caddy joins letter-by-letter_default and proxies to letter-by-letter:4000.
-# Production publishes no host port. For an isolated candidate, use a separate
-# compose project (-p) and a temporary override binding a candidate-only port.
-# LETTER_IMAGE and LETTER_CONTAINER_NAME remain available for candidates.
+# Caddy joins letter-by-letter_default and proxies to letter-by-letter:4000;
+# no host port is published. State lives in memory only, so the container is
+# read-only and stateless. For a side-by-side candidate use a separate project
+# name (-p) plus LETTER_IMAGE / LETTER_CONTAINER_NAME overrides.
 services:
     letter-by-letter:
         container_name: "${LETTER_CONTAINER_NAME:-letter-by-letter}"
@@ -18,6 +14,9 @@ services:
         environment:
             NODE_ENV: production
             PORT: "4000"
+            # Only Caddy can reach this container, so its X-Forwarded-For is
+            # the real client address (used for per-address limits).
+            TRUST_PROXY: "1"
         restart: unless-stopped
         init: true
         read_only: true
