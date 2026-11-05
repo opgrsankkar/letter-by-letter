@@ -1,6 +1,7 @@
 // End-to-end: three phones play a full round in a real browser against the
 // built client. Requires `vite build` first (npm run test:e2e does it) and a
 // Chromium binary (CHROME_PATH, or a Playwright-managed / system Chrome).
+// Set E2E_BASE_URL to run it against a deployed server instead.
 
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,12 +28,18 @@ function findChrome(): string | undefined {
   return ['/usr/bin/google-chrome', '/usr/bin/chromium'].find(existsSync);
 }
 
-let server: RunningServer;
+let server: RunningServer | undefined;
 let browser: Browser;
 let base: string;
 
 before(async () => {
   mkdirSync(shots, { recursive: true });
+  browser = await chromium.launch({ executablePath: findChrome() });
+  // E2E_BASE_URL points the test at an already-running deployment instead.
+  if (process.env.E2E_BASE_URL) {
+    base = process.env.E2E_BASE_URL.replace(/\/$/, '');
+    return;
+  }
   server = await startServer({
     port: 0,
     host: '127.0.0.1',
@@ -51,7 +58,6 @@ before(async () => {
     log: () => {},
   });
   base = `http://127.0.0.1:${server.port}`;
-  browser = await chromium.launch({ executablePath: findChrome() });
 });
 
 after(async () => {
