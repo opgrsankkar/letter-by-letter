@@ -11,14 +11,20 @@ export type Team = (typeof TEAMS)[number];
 export type Phase = 'lobby' | 'choosing' | 'playing' | 'reveal';
 
 /**
- * A round is played in two stages. First only the letter holders hint, and a
- * correct guess is worth POINTS.letters, provided the guesser had already
- * hinted their own letters (otherwise POINTS.clue: no profiting from hinting
- * last). When the clue-giver chooses, the word-clue stage starts and guesses
- * are worth POINTS.clue. The clue-giver earns POINTS.solved for a solved word.
+ * A round is played in two stages.
+ *
+ * 1. Letter hints: holders hint in a dealt order, one after another, as if
+ *    going round the table. A correct guess is worth POINTS.letters if the
+ *    guesser had already hinted their own letters (otherwise POINTS.clue).
+ * 2. Word clue: once everyone has hinted, the clue-giver may clue the whole
+ *    word. Guesses are worth POINTS.clue.
+ *
+ * The clue-giver scores POINTS.hostClue if their word needed the word clue
+ * (a word the letters alone could not crack), or POINTS.hostLetters if the
+ * letters were enough or they opened the word clue before everyone hinted.
  */
 export type Stage = 'letters' | 'clue';
-export const POINTS = { letters: 2, clue: 1, solved: 1 } as const;
+export const POINTS = { letters: 2, clue: 1, hostLetters: 1, hostClue: 2 } as const;
 
 export const LIMITS = {
   nameMax: 16,
@@ -82,6 +88,8 @@ export interface RoundSummary {
   guesserId: string | null;
   /** Stage the round had reached when it ended (null if it never started). */
   stage: Stage | null;
+  /** The clue-giver opened the word clue before every holder had hinted. */
+  early: boolean;
   /** Points handed out this round, by player. */
   points: Record<string, number>;
   /** playerId -> letters they held. */
@@ -102,6 +110,10 @@ export interface View {
   stage: Stage | null;
   /** Holders who have finished hinting their letters (playing phase only). */
   hinted: string[];
+  /** The order holders hint in (playing phase only). */
+  hintOrder: string[];
+  /** The clue-giver opened the word clue before everyone had hinted. */
+  early: boolean;
   players: PlayerView[];
   scores: Record<Team, number>;
   timerSeconds: number;

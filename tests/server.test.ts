@@ -253,8 +253,14 @@ test('a full round over the wire keeps the word private until the reveal', async
     });
 
     // Stage 1: holders say they've hinted; then the clue-giver opens the word clue.
-    for (const h of holders) h.send({ type: 'hinted', done: true });
-    await host.viewWhere((v) => v.hinted.length === holders.length && v.stage === 'letters');
+    const order = hostView.hintOrder.map((id) => holders.find((h) => h.id === id)!);
+    order[1].send({ type: 'hinted', done: true });
+    assert.equal((await order[1].error('not_allowed')).code, 'not_allowed');
+    for (const [i, h] of order.entries()) {
+      h.send({ type: 'hinted', done: true });
+      await host.viewWhere((v) => v.hinted.length === i + 1);
+    }
+    assert.equal(holders.length, order.length);
     holders[0].send({ type: 'unlock' });
     assert.equal((await holders[0].error('not_allowed')).code, 'not_allowed');
     host.send({ type: 'unlock' });
@@ -267,7 +273,7 @@ test('a full round over the wire keeps the word private until the reveal', async
       assert.equal(r.last!.guesserId, holders[1].id);
       assert.equal(r.last!.stage, 'clue');
       assert.equal(r.players.find((p) => p.id === holders[1].id)!.score, 1);
-      assert.equal(r.players.find((p) => p.id === hostId)!.score, 1);
+      assert.equal(r.players.find((p) => p.id === hostId)!.score, 2);
     }
 
     const bystander = holders.find((h) => h !== asha)!;

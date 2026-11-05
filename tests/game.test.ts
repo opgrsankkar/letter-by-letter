@@ -29,6 +29,14 @@ function roomWith(count: number, seed = 1) {
   return { room, players, deps };
 }
 
+/** Holders hint in the dealt order; hint everyone up to and including `id`. */
+function hintThrough(room: Room, id?: string) {
+  for (const pid of room.viewFor(room.hostId!).hintOrder) {
+    room.markHinted(pid, true);
+    if (pid === id) break;
+  }
+}
+
 function throwsCode(fn: () => void, code: string) {
   assert.throws(fn, (err) => err instanceof GameError && err.code === code);
 }
@@ -120,7 +128,7 @@ test('a full round: deal, private views, award, reveal, next', () => {
 
   throwsCode(() => room.award(others[0].id, others[1].id), 'not_allowed');
   throwsCode(() => room.award(hostId, hostId), 'bad_request');
-  room.markHinted(others[1].id, true);
+  hintThrough(room, others[1].id);
   room.award(hostId, others[1].id);
   assert.equal(room.phase, 'reveal');
   // Guessed during the letter stage: 2 for the guesser, 1 for the clue-giver.
@@ -150,7 +158,7 @@ test('two stages: holders hint first; only the clue-giver opens the word clue', 
   room.deal(host, 'CACTUS');
   assert.equal(room.viewFor(holders[0].id).stage, 'letters');
   throwsCode(() => room.markHinted(host, true), 'not_allowed');
-  for (const h of holders) room.markHinted(h.id, true);
+  hintThrough(room);
   assert.deepEqual(room.viewFor(host).hinted.sort(), holders.map((h) => h.id).sort());
   // Everyone hinting does not move the stage on by itself: a guess made in the
   // letter stage must not be downgraded because someone tapped "done" first.
@@ -160,7 +168,7 @@ test('two stages: holders hint first; only the clue-giver opens the word clue', 
 
   room.award(host, holders[0].id);
   assert.equal(room.player(holders[0].id)!.score, 1);
-  assert.equal(room.player(host)!.score, 1);
+  assert.equal(room.player(host)!.score, 2, 'a word that needed the clue pays the clue-giver +2');
   assert.equal(room.last!.stage, 'clue');
   assert.deepEqual(room.viewFor(holders[0].id).hinted, []);
 });
@@ -169,8 +177,8 @@ test('a letter-stage guess only earns +2 if the guesser had hinted their own let
   const { room, players } = roomWith(4);
   room.start(players[0].id);
   const host = room.hostId!;
-  const [early, late] = players.filter((p) => p.id !== host);
   room.deal(host, 'VOLCANO');
+  const [early, late] = room.viewFor(host).hintOrder.map((id) => room.player(id)!);
   room.markHinted(early.id, true);
   room.award(host, late.id);
   assert.equal(room.player(late.id)!.score, 1, 'hinting last does not pay');
@@ -182,7 +190,58 @@ test('a letter-stage guess only earns +2 if the guesser had hinted their own let
   room.award(host, early.id, 'clue');
   assert.equal(room.player(early.id)!.score, 1);
   assert.equal(room.last!.stage, 'clue');
+  assert.equal(room.player(host)!.score, 2);
+});
+
+test('holders hint in the dealt order, and can only undo before the next player goes', () => {
+  const { room, players } = roomWith(5);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'PINEAPPLE');
+  const order = room.viewFor(host).hintOrder;
+  assert.equal(order.length, 4);
+  assert.deepEqual(room.pendingHinters(), order);
+  throwsCode(() => room.markHinted(order[1], true), 'not_allowed');
+  room.markHinted(order[0], true);
+  room.markHinted(order[0], false);
+  room.markHinted(order[0], true);
+  room.markHinted(order[1], true);
+  throwsCode(() => room.markHinted(order[0], false), 'not_allowed');
+  // Someone away is skipped rather than holding the table up.
+  room.setConnected(order[2], false);
+  room.markHinted(order[3], true);
+  assert.deepEqual(room.pendingHinters(), []);
+});
+
+test("opening the word clue early caps the clue-giver's reward", () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'GIRAFFE');
+  room.unlock(host);
+  assert.equal(room.viewFor(host).early, true);
+  const guesser = players.find((p) => p.id !== host)!;
+  room.award(host, guesser.id);
+  assert.equal(room.player(guesser.id)!.score, 1);
   assert.equal(room.player(host)!.score, 1);
+  assert.equal(room.last!.early, true);
+});
+
+test('a wrong credit can still be fixed after Next round, until the next deal', () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'MEADOW');
+  hintThrough(room);
+  const [a, b] = players.filter((p) => p.id !== host);
+  room.award(host, a.id);
+  room.next(host);
+  assert.equal(room.phase, 'choosing');
+  room.award(host, b.id);
+  assert.equal(room.player(a.id)!.score, 0);
+  assert.equal(room.player(b.id)!.score, 2);
+  room.deal(room.hostId!, 'TULIP');
+  throwsCode(() => room.award(host, a.id), 'not_allowed');
 });
 
 test('the clue-giver can open the word clue early', () => {
@@ -202,7 +261,7 @@ test('the clue-giver can correct who guessed during the reveal', () => {
   const host = room.hostId!;
   const [a, b] = players.filter((p) => p.id !== host);
   room.deal(host, 'BEAVER');
-  room.markHinted(a.id, true);
+  hintThrough(room, a.id);
   room.award(host, a.id);
   assert.equal(room.player(a.id)!.score, 2);
   throwsCode(() => room.award(a.id, b.id), 'not_allowed');
@@ -388,7 +447,7 @@ test('ending the game shows final scores; a new game starts from zero', () => {
   const host = room.hostId!;
   const guesser = players.find((p) => p.id !== host)!;
   room.deal(host, 'ACORN');
-  room.markHinted(guesser.id, true);
+  hintThrough(room, guesser.id);
   room.award(host, guesser.id);
   const notOwner = players.find((p) => p.id !== owner.id)!;
   throwsCode(() => room.end(notOwner.id), 'not_allowed');

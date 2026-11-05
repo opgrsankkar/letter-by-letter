@@ -136,7 +136,7 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
     await host.page.getByRole('button', { name: 'Deal 7 letters' }).waitFor();
     await snap(host, '04-choose');
     await host.page.getByRole('button', { name: 'Deal 7 letters' }).click();
-    await host.page.getByText('Who guessed it?').waitFor();
+    await host.page.getByText('Heard the word?').waitFor();
     await snap(host, '05-host-play');
 
     // Holders peek at their letters; together they spell the word.
@@ -163,13 +163,20 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
     assert.deepEqual(await holders[0].page.locator('button.hand .tile-face').allInnerTexts(), mine);
 
     // Stage 1 -> 2: holders hint, then the clue-giver opens the word clue.
+    // Holders hint in the dealt order: exactly one of them has the turn at a time.
     await host.page.getByText('Stay quiet for now').waitFor();
-    await holders[0].page.getByText('Waiting on you and').waitFor();
-    for (const h of holders) await h.page.getByRole('button', { name: 'I’ve hinted all my letters' }).click();
+    for (let turn = 0; turn < holders.length; turn += 1) {
+      await holders[0].page.waitForTimeout(300);
+      const up = [];
+      for (const h of holders) if (await h.page.getByText('Your turn to hint').isVisible()) up.push(h);
+      assert.equal(up.length, 1, `exactly one holder is up on turn ${turn}`);
+      await up[0].page.getByRole('button', { name: 'I’ve hinted my letters' }).click();
+      await up[0].page.getByText('✓ Hinted').waitFor();
+    }
     await host.page.getByText('Everyone has hinted').waitFor();
     await host.page.getByRole('button', { name: 'Start my word clue' }).click();
     await host.page.getByText('Clue the whole word').waitFor();
-    await holders[0].page.getByText('Word clue').waitFor();
+    await holders[0].page.getByText('Word clue', { exact: true }).waitFor();
 
     // The clue-giver credits a guesser, then fixes the mis-tap from the reveal.
     await host.page.getByRole('button', { name: `${holders[1].name} guessed it, plus 1` }).click();
@@ -200,6 +207,12 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
     await host.page.getByRole('button', { name: 'Next round' }).click();
     await Promise.all(all.map((p) => p.page.getByText('Round 2').waitFor()));
     await all.find((p) => p.page.url() && p !== host)!.page.getByText('Last round').waitFor();
+
+    // Until the next word is dealt, the last clue-giver can still fix the credit.
+    await host.page.getByRole('button', { name: 'Fix', exact: true }).click();
+    await host.page.getByRole('radio', { name: /After clue/ }).click();
+    await host.page.getByRole('button', { name: `${holders[1].name} guessed it` }).click();
+    for (const p of all) await p.page.locator('.recap', { hasText: `${holders[1].name} +1` }).waitFor();
 
     // An invite link to a different room wins over the saved seat.
     await chen.page.goto(`${base}/r/WXYA`);
