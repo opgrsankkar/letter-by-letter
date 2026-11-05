@@ -127,6 +127,8 @@ export interface View {
   hinted: string[];
   /** The order holders hint in (playing phase only). */
   hintOrder: string[];
+  /** Server time the table last moved on: lets phones nudge a slow turn. */
+  waitingSince: number;
   /** The clue-giver opened the word clue before everyone had hinted. */
   early: boolean;
   players: PlayerView[];

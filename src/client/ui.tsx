@@ -221,3 +221,16 @@ export function ConfirmButton(props: { class?: string; label: string; confirm: s
     </button>
   );
 }
+
+/** How long (ms) the table has been waiting on the current step, ticking every few seconds. */
+export function useWaited(since: number, skew: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 3000);
+    return () => clearInterval(t);
+  }, []);
+  return Math.max(0, now + skew - since);
+}
+
+/** After this long on one step, phones gently point at what is holding the table up. */
+export const SLOW_MS = 45_000;
