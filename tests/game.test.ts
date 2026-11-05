@@ -675,20 +675,3 @@ test('ownership survives a brief disconnect, and the owner cannot cut off the cl
   room.next(notHost.id);
   assert.equal(room.phase, 'choosing');
 });
-
-test('views say how long the table has waited on the current step', () => {
-  const { room, players, deps } = roomWith(3);
-  room.start(players[0].id);
-  const host = room.hostId!;
-  const t0 = room.viewFor(host).waitingSince;
-  deps.advance(50_000);
-  room.deal(host, 'COMET');
-  const t1 = room.viewFor(host).waitingSince;
-  assert.equal(t1 - t0, 50_000);
-  deps.advance(10_000);
-  room.markHinted(room.viewFor(host).hintOrder[0], true);
-  assert.equal(room.viewFor(host).waitingSince, t1 + 10_000);
-  deps.advance(5_000);
-  room.advanceHint(host);
-  assert.equal(room.viewFor(host).waitingSince, t1 + 15_000);
-});

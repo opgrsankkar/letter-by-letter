@@ -25,8 +25,6 @@ import {
   TileWord,
   TeamDot,
   useWakeLock,
-  useWaited,
-  SLOW_MS,
 } from './ui.tsx';
 
 export function App() {
@@ -661,7 +659,6 @@ function Choose({ game, view }: { game: Game; view: View }) {
 }
 
 function Waiting({ game, view, host }: { game: Game; view: View; host: PlayerView | null }) {
-  const waited = useWaited(view.waitingSince, game.skew);
   return (
     <div class="stack-lg">
       <LastRecap view={view} game={game} />
@@ -685,11 +682,6 @@ function Waiting({ game, view, host }: { game: Game; view: View; host: PlayerVie
           {view.round === 1 && ' Clue-givers alternate between teams, and everyone gets a turn.'}
         </p>
       </section>
-      {waited > SLOW_MS && host?.connected && (
-        <p class="muted small center">
-          Taking a while? Any word will do, {host.name}. You can also tap “Pass” to let someone else give clues.
-        </p>
-      )}
       <HostAwayNotice game={game} host={host} />
       <section class="card">
         <TeamColumns view={view} showScores />
@@ -749,9 +741,8 @@ function guessValue(view: View, p: PlayerView): number {
   return p.tileCount === 0 || view.hinted.includes(p.id) ? POINTS.letters : POINTS.clue;
 }
 
-function StageBanner({ view, host, skew }: { view: View; host: PlayerView | null; skew: number }) {
+function StageBanner({ view, host }: { view: View; host: PlayerView | null }) {
   const { current } = hintQueue(view);
-  const slow = useWaited(view.waitingSince, skew) > SLOW_MS;
   const clueGiver = host ? (
     <>
       Clues: <span class={`name team-${host.team}`}>{host.name}</span>
@@ -768,11 +759,6 @@ function StageBanner({ view, host, skew }: { view: View; host: PlayerView | null
             {current ? `Letter hints, in order. Guesses score +${POINTS.letters} once you've hinted.` : `${host?.name ?? 'The clue-giver'} can start the word clue.`}
           </span>
           <span class="stage-meta">{clueGiver}</span>
-          {slow && current && !mine && host && (
-            <span class="stage-nudge">
-              Taking a while? If {current.name} has said their hints, {host.name} can tap “{current.name}’s done”.
-            </span>
-          )}
         </div>
       </div>
     );
@@ -800,11 +786,6 @@ function HolderPlay({ game, view, host }: { game: Game; view: View; host: Player
   const myTurn = current?.id === view.you;
   const myIndex = order.findIndex((p) => p.id === view.you);
   const laterHinted = order.slice(myIndex + 1).some((p) => view.hinted.includes(p.id));
-  const waited = useWaited(view.waitingSince, game.skew);
-  const slowTurn = myTurn && view.stage === 'letters' && waited > SLOW_MS;
-  useEffect(() => {
-    if (slowTurn && navigator.userActivation?.hasBeenActive) navigator.vibrate?.([80, 80, 80]);
-  }, [slowTurn]);
 
   // A new hand buzzes the phone so nobody misses it; so does your turn to hint.
   useEffect(() => {
@@ -836,7 +817,7 @@ function HolderPlay({ game, view, host }: { game: Game; view: View; host: Player
   return (
     <div class="stack-lg">
       <Countdown deadline={view.deadline} skew={game.skew} total={view.timerSeconds} />
-      <StageBanner view={view} host={host} skew={game.skew} />
+      <StageBanner view={view} host={host} />
       {letters.length > 0 ? (
         <section class="hand-wrap">
           <button class={`hand${shown ? ' is-shown' : ''}`} onClick={toggle} aria-pressed={shown} aria-label={handLabel}>
@@ -856,7 +837,6 @@ function HolderPlay({ game, view, host }: { game: Game; view: View; host: Player
               </button>
             ) : myTurn ? (
               <>
-                {slowTurn && <p class="your-turn is-urgent">Everyone is waiting on you.</p>}
                 <p class="your-turn">
                   Hint at {letters.length === 1 ? 'your letter' : `each of your ${letters.length} letters`} out loud, without saying{' '}
                   {letters.length === 1 ? 'it' : 'them'}. Then tap:
@@ -954,7 +934,6 @@ function HostPlay({ game, view }: { game: Game; view: View }) {
   const [hideWord, setHideWord] = useSessionFlag('lbl.hideWord');
   const { pending, current } = hintQueue(view);
   const allHinted = view.stage === 'letters' && !current;
-  const hostWaited = useWaited(view.waitingSince, game.skew);
   // Nudge the clue-giver the moment the table is ready for their word clue.
   useEffect(() => {
     if (allHinted && navigator.userActivation?.hasBeenActive) navigator.vibrate?.([40, 60, 40]);
@@ -1006,10 +985,7 @@ function HostPlay({ game, view }: { game: Game; view: View }) {
         </span>
         {view.stage === 'letters' &&
           (current ? (
-            <button
-              class={`btn small ${hostWaited > SLOW_MS ? 'primary' : 'ghost'}`}
-              onClick={() => game.send({ type: 'advance-hint' })}
-            >
+            <button class="btn ghost small" onClick={() => game.send({ type: 'advance-hint' })}>
               {current.name}’s done →
             </button>
           ) : (
@@ -1017,9 +993,6 @@ function HostPlay({ game, view }: { game: Game; view: View }) {
               Start word clue
             </button>
           ))}
-        {view.stage === 'letters' && !current && (
-          <span class="host-status-note">Tap it before you say your clue, so guesses score right.</span>
-        )}
       </div>
 
       <section class="card stack guess-card">

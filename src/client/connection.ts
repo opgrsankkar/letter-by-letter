@@ -99,7 +99,7 @@ export function useGame(): Game {
   const toast = (text: string) => {
     const id = Date.now() + Math.random();
     setToasts((t) => [...t.slice(-2), { id, text }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4000);
   };
 
   useEffect(() => {
