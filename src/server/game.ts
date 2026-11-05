@@ -11,7 +11,6 @@ import {
   type Phase,
   POINTS,
   type RoundSummary,
-  type GuessKind,
   type Stage,
   type Team,
   type View,
@@ -346,14 +345,10 @@ export class Room {
 
   /**
    * The clue-giver credits whoever guessed (or nobody), ending the round.
-   *
-   * The phones cannot hear when a guess was spoken, so `kind` lets the
-   * clue-giver say how it came about: a player who shouted the word and only
-   * then tapped "hinted" guessed 'before-hint'. Until the next word is dealt the
-   * same player may correct the guesser and the kind; points are re-scored.
-   * Nobody can be given a full +2 they could not have earned in that round.
+   * Until the next word is dealt the same player may correct who guessed and
+   * which stage it was in; the round's points are re-scored.
    */
-  award(id: string, guesserId: string | null, kind?: GuessKind): void {
+  award(id: string, guesserId: string | null, guessedIn?: Stage): void {
     this.requirePhase(['playing', 'reveal', 'choosing']);
     // Corrections stay open until the next word is dealt.
     if (this.phase !== 'playing') {
@@ -367,37 +362,21 @@ export class Room {
         if (p) p.score -= pts;
       }
       last.guesserId = guesserId;
-      const fallback: GuessKind = last.stage === 'clue' ? 'clue' : 'letters';
-      last.kind = guesserId ? this.settleKind(guesserId, kind ?? last.kind ?? fallback, last.eligible) : null;
-      last.points = this.scoreKind(id, guesserId, last.kind, last.early);
+      last.guessedIn = guesserId ? (guessedIn ?? last.guessedIn ?? last.stage ?? 'clue') : null;
+      last.points = this.scoreStage(id, guesserId, last.guessedIn, last.early);
       return;
     }
     this.requireHost(id);
     this.validateGuesser(id, guesserId);
-    const eligible = this.eligibleNow();
-    let final: GuessKind | null = null;
-    if (guesserId) {
-      // Default from the stage; a word-clue guess cannot predate the word clue.
-      const asked = kind ?? (this.stage === 'clue' ? 'clue' : 'letters');
-      final = this.settleKind(guesserId, asked === 'clue' && this.stage !== 'clue' ? 'letters' : asked, eligible);
-    }
-    this.finishRound(guesserId, this.scoreKind(id, guesserId, final, this.early), final, eligible);
+    // Live, the phone knows the stage: a guess counts for the stage it was tapped in.
+    const stage = guesserId ? (this.stage ?? 'clue') : null;
+    this.finishRound(guesserId, this.scoreStage(id, guesserId, stage, this.early), stage);
   }
 
-  /** Who could earn a full letter-stage +2 right now. */
-  private eligibleNow(): string[] {
-    return this.players.filter((p) => !this.holdings.has(p.id) || this.hinted.has(p.id)).map((p) => p.id);
-  }
-
-  /** Never more than the guesser could have earned: no +2 without having hinted. */
-  private settleKind(guesserId: string, kind: GuessKind, eligible: string[]): GuessKind {
-    return kind === 'letters' && !eligible.includes(guesserId) ? 'before-hint' : kind;
-  }
-
-  private scoreKind(hostId: string, guesserId: string | null, kind: GuessKind | null, early: boolean): Record<string, number> {
-    if (!guesserId || !kind) return {};
-    const value = kind === 'letters' ? POINTS.letters : POINTS.clue;
-    return this.scoreRound(hostId, guesserId, value, this.hostValue(kind === 'clue', early));
+  private scoreStage(hostId: string, guesserId: string | null, stage: Stage | null, early: boolean): Record<string, number> {
+    if (!guesserId || !stage) return {};
+    const value = stage === 'letters' ? POINTS.letters : POINTS.clue;
+    return this.scoreRound(hostId, guesserId, value, this.hostValue(stage === 'clue', early));
   }
 
   private hostValue(neededClue: boolean, early: boolean): number {
@@ -545,8 +524,7 @@ export class Room {
   private finishRound(
     guesserId: string | null,
     points: Record<string, number> = {},
-    kind: GuessKind | null = null,
-    eligible: string[] = this.eligibleNow(),
+    guessedIn: Stage | null = null,
   ): void {
     this.last = {
       round: this.round,
@@ -555,8 +533,7 @@ export class Room {
       guesserId,
       stage: this.stage,
       early: this.early,
-      eligible,
-      kind,
+      guessedIn,
       points,
       holdings: Object.fromEntries(this.holdings),
     };

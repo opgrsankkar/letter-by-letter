@@ -138,7 +138,7 @@ test('a full round: deal, private views, award, reveal, next', () => {
   assert.equal(reveal.last!.word, 'ORANGE');
   assert.equal(reveal.last!.guesserId, others[1].id);
   assert.equal(reveal.last!.stage, 'letters');
-  assert.equal(reveal.last!.kind, 'letters');
+  assert.equal(reveal.last!.guessedIn, 'letters');
   assert.deepEqual(reveal.last!.points, { [others[1].id]: 2, [hostId]: 1 });
   assert.equal(reveal.letters, null);
   assert.equal(reveal.scores.ember + reveal.scores.tide, 3);
@@ -174,25 +174,6 @@ test('two stages: holders hint first; only the clue-giver opens the word clue', 
   assert.deepEqual(room.viewFor(holders[0].id).hinted, []);
 });
 
-test('a letter-stage guess only earns +2 if the guesser had hinted their own letters', () => {
-  const { room, players } = roomWith(4);
-  room.start(players[0].id);
-  const host = room.hostId!;
-  room.deal(host, 'VOLCANO');
-  const [early, late] = room.viewFor(host).hintOrder.map((id) => room.player(id)!);
-  room.markHinted(early.id, true);
-  room.award(host, late.id);
-  assert.equal(room.player(late.id)!.score, 1, 'hinting last does not pay');
-  assert.equal(room.last!.stage, 'letters');
-  // The clue-giver can override from the reveal, including the stage.
-  room.award(host, early.id, 'letters');
-  assert.equal(room.player(late.id)!.score, 0);
-  assert.equal(room.player(early.id)!.score, 2);
-  room.award(host, early.id, 'clue');
-  assert.equal(room.player(early.id)!.score, 1);
-  assert.equal(room.last!.kind, 'clue');
-  assert.equal(room.player(host)!.score, 2);
-});
 
 test('holders hint in the dealt order, and can only undo before the next player goes', () => {
   const { room, players } = roomWith(5);
@@ -516,21 +497,6 @@ test('a short word at a big table: players without letters are not in the hint q
   assert.equal(room.player(spectator.id)!.score, 2);
 });
 
-test('correcting credit never upgrades a guesser who had not hinted', () => {
-  const { room, players } = roomWith(4);
-  room.start(players[0].id);
-  const host = room.hostId!;
-  room.deal(host, 'BADGER');
-  const [first, , last] = room.viewFor(host).hintOrder;
-  room.markHinted(first, true);
-  room.award(host, last);
-  assert.equal(room.player(last)!.score, 1);
-  room.award(host, last, 'letters');
-  assert.equal(room.player(last)!.score, 1, 'still +1: they had not hinted');
-  room.award(host, first, 'letters');
-  assert.equal(room.player(first)!.score, 2);
-  assert.equal(room.player(last)!.score, 0);
-});
 
 test("leaving keeps a player's points with their team, and corrections still balance", () => {
   const { room, players } = roomWith(4);
@@ -574,28 +540,6 @@ test('letters handed on from someone who never hinted must be hinted again', () 
 
 // --- Findings from the six-player gpt-6.1-sol playtest --------------------------
 
-test('a guess shouted before hinting can be scored +1 even if they hinted before the tap', () => {
-  const { room, players } = roomWith(4);
-  room.start(players[0].id);
-  const host = room.hostId!;
-  room.deal(host, 'OCTOPUS');
-  const order = room.viewFor(host).hintOrder;
-  // Chen (order[0]) shouts OCTOPUS, then taps "hinted" before the clue-giver credits him.
-  room.markHinted(order[0], true);
-  room.award(host, order[0], 'before-hint');
-  assert.equal(room.player(order[0])!.score, 1);
-  assert.equal(room.player(host)!.score, 1);
-  assert.equal(room.last!.kind, 'before-hint');
-  // And the fix panel can move between all three kinds.
-  room.award(host, order[0], 'letters');
-  assert.equal(room.player(order[0])!.score, 2);
-  room.award(host, order[0], 'before-hint');
-  assert.equal(room.player(order[0])!.score, 1);
-  assert.equal(room.player(host)!.score, 1);
-  room.award(host, order[0], 'clue');
-  assert.equal(room.player(host)!.score, 2, 'needed the clue');
-  assert.equal(room.scores().ember + room.scores().tide, 3);
-});
 
 test('a word-clue guess cannot be claimed before the word clue started', () => {
   const { room, players } = roomWith(3);
@@ -605,7 +549,7 @@ test('a word-clue guess cannot be claimed before the word clue started', () => {
   hintThrough(room);
   const guesser = room.viewFor(host).hintOrder[0];
   room.award(host, guesser, 'clue');
-  assert.equal(room.last!.kind, 'letters');
+  assert.equal(room.last!.guessedIn, 'letters');
   assert.equal(room.player(host)!.score, 1);
 });
 
@@ -674,4 +618,20 @@ test('ownership survives a brief disconnect, and the owner cannot cut off the cl
   room.setConnected(host, false);
   room.next(notHost.id);
   assert.equal(room.phase, 'choosing');
+});
+
+test('any correct guess during letter hints scores +2, and fixes can move it between stages', () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'OCTOPUS');
+  const lastInOrder = room.viewFor(host).hintOrder.at(-1)!;
+  room.award(host, lastInOrder); // has not hinted yet: still a letter-stage guess
+  assert.equal(room.player(lastInOrder)!.score, 2);
+  assert.equal(room.player(host)!.score, 1);
+  assert.equal(room.last!.guessedIn, 'letters');
+  room.award(host, lastInOrder, 'clue');
+  assert.equal(room.player(lastInOrder)!.score, 1);
+  assert.equal(room.player(host)!.score, 2, 'the word needed the clue');
+  assert.equal(room.last!.guessedIn, 'clue');
 });

@@ -12,8 +12,8 @@ import {
   cleanName,
   type ClientMessage,
   type ServerMessage,
-  GUESS_KINDS,
-  type GuessKind,
+  STAGES,
+  type Stage,
 } from '../shared/protocol.ts';
 
 export interface ServerOptions {
@@ -276,7 +276,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
         room.pass(playerId);
         break;
       case 'award':
-        room.award(playerId, msg.playerId, msg.kind);
+        room.award(playerId, msg.playerId, msg.guessedIn);
         break;
       case 'next':
         room.next(playerId);
@@ -392,9 +392,9 @@ function parseMessage(raw: unknown): ClientMessage | null {
       return typeof m.done === 'boolean' ? { type: 'hinted', done: m.done } : null;
     case 'award': {
       if (!(m.playerId === null || str('playerId'))) return null;
-      if (m.kind !== undefined && !GUESS_KINDS.includes(m.kind as GuessKind)) return null;
-      return m.kind
-        ? { type: 'award', playerId: m.playerId as string | null, kind: m.kind as GuessKind }
+      if (m.guessedIn !== undefined && !STAGES.includes(m.guessedIn as Stage)) return null;
+      return m.guessedIn
+        ? { type: 'award', playerId: m.playerId as string | null, guessedIn: m.guessedIn as Stage }
         : { type: 'award', playerId: m.playerId as string | null };
     }
     case 'leave':
