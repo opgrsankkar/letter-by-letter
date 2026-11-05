@@ -1,12 +1,5 @@
-node_modules
-.DS_Store
-dist
-server/dist
-client/dist
+node_modules/
+dist/
+*.log
 .env
-
-# Scratch review/audit evidence — never committed
-*-full.json
-*-production.json
-IMPLEMENT-TASK.md
-IMPLEMENT-REVIEW.md
+test-results/

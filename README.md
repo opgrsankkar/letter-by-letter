@@ -1,89 +1,80 @@
 # Letter by Letter
 
-Multiplayer facilitator web app per PRD.
+A word party game for people in the same room, played on everyone's phone.
 
-## Stack
+Each round one player gives the clues. They pick a secret word, and its letters
+are shuffled and dealt to everyone else, a few each. Letter holders hint at their
+letters out loud, the clue-giver hints at the whole word, and the table shouts
+guesses. The clue-giver taps whoever got it first, and that player's team (Ember
+or Tide) scores. All the talking happens out loud; the app only deals the cards
+and keeps score.
 
--   Server: Node.js + Express + Socket.IO
--   Client: React + Vite + TypeScript + TailwindCSS
+## What the app does
 
-## Quick Start
+- **Rooms**: four-character codes (no look-alike characters), a QR code and a
+  `/r/CODE` invite link. Up to 10 players per room.
+- **Teams**: new players join the smaller team. Players can switch or shuffle
+  teams between rounds.
+- **Fair rotation**: everyone gives clues once before anyone goes twice, and
+  nobody gives clues twice in a row.
+- **Word deck**: six categories to draw from, or type your own word (3–20
+  letters, A–Z).
+- **Privacy**: each phone gets its own view. Holders see only their own letters,
+  face down until tapped. The clue-giver sees the word and who holds what.
+  Everyone else sees the word only at the reveal.
+- **Survives flaky phones**: a seat token in `localStorage` brings a player back
+  to the same seat, letters and score after a refresh or reconnect. If the
+  clue-giver drops off, anyone can skip their turn.
+- **Optional timer** (1–3 minutes) and a screen wake lock while a game runs.
 
-Install dependencies (from repo root run both):
-
-Server (port 4000 default) and client (port 5173 default) run separately.
-
-From two terminals:
-
-```
-cd server && npm install && npm run dev
-```
-
-```
-cd client && npm install && npm run dev
-```
-
-### Server
-
-1. `cd server`
-2. Install: `npm install`
-3. Dev: `npm run dev`
-
-### Client
-
-1. `cd client`
-2. Install: `npm install`
-3. Dev: `npm run dev`
-
-Open the client in the browser and point it to the server URL if different (set `VITE_SERVER_URL`).
-
-### Gameplay Flow
-
-1. Player A creates room, shares code.
-2. Others join.
-3. Start round -> random host.
-4. Host enters word -> letters distributed.
-5. Verbal play; start another round when ready.
-
-## Single-Port (Server + Client) Production Build
-```
-npm run build:all
-npm run start:prod
-```
-Open http://localhost:4000 (or your LAN IP). The server will serve `client/dist` automatically if present.
-
-### Root Convenience Scripts
-From repo root (`package.json` added):
-```
-npm run build:all   # installs & builds client then server
-npm run start:prod  # runs server/dist (after build)
-npm run dev         # runs server dev + client dev concurrently
-npm test            # installs client deps, builds server, runs isolated integration tests
-```
-
-You do NOT need an extra copy step: the server looks for `client/dist` directly. Only add an automatic copy if you ever restructure the folders or want to decouple artifacts. For now this is simpler and fine.
-
-## Deploying to Vercel (Single Server + Static Client)
-Because Vercel treats Node serverless functions differently than persistent WebSocket servers, to use Socket.IO you must deploy as a single Node server (e.g. via the Vercel Node runtime with `"output": "standalone"` or a build output). Simplest path:
-
-1. Ensure root scripts (already present) build and copy the client into `server/dist/static`.
-2. Set Vercel Build Command:
-```
-npm run build:all
-```
-3. Set Vercel Output / Start Command:
-```
-npm run start:prod
-```
-4. Specify Node version (optional) in a `engines` field or `.nvmrc`.
-
-The server at runtime serves static assets from `dist/static` automatically (fallback path added). WebSocket endpoint stays under the same origin.
-
-NOTE: Vercel serverless functions are not ideal for long-lived WebSocket connections; if you need scalability, consider a small VPS / Fly.io / Render deployment or enable Vercel Edge + a separate WebSocket provider (e.g. Ably / Pusher). For casual in-room play, a single Node process is sufficient.
-
-## Monorepo layout
+## Layout
 
 ```
-server/  # Express + Socket.IO backend
-client/  # React frontend
+src/shared/   protocol types, validation, word deck (used by both sides)
+src/server/   game.ts: pure engine · server.ts: HTTP + WebSocket · main.ts: entry
+src/client/   Preact UI (Vite), hand-written CSS, self-hosted fonts
+tests/        engine unit tests, server integration tests, browser e2e
 ```
+
+The server is plain Node 24 running TypeScript directly (type stripping), with
+`ws` as its only runtime dependency. It sends every player a personalised view
+after each change. Secrets never go out in a shared broadcast.
+
+## Develop
+
+Node 24 or newer.
+
+```bash
+npm ci
+npm run dev        # server on :4000, Vite on :5173 (proxies /ws)
+npm run check      # typecheck + unit/integration tests + browser e2e
+```
+
+The e2e test drives three phones in headless Chromium. It finds a
+Playwright-managed Chromium in `~/.cache/ms-playwright` or a system Chrome, or
+uses `CHROME_PATH`. Screenshots of each phase land in `test-results/`.
+
+Runtime settings (env): `PORT` (4000), `HOST` (0.0.0.0), `MAX_ROOMS` (200),
+`MAX_CONNECTIONS` (1000), `ABANDON_AFTER_MIN` (15: delete a room nobody is
+connected to), `AWAY_AFTER_MIN` (30: drop a player who has been gone that long),
+`RATE_BURST` / `RATE_PER_SECOND` (20 / 5 messages per socket).
+
+## Deploy (x1c homelab)
+
+Production runs from `/srv/apps/letter-by-letter` as the `letter-by-letter`
+container. Caddy reaches it on the `letter-by-letter_default` network at
+`letter-by-letter:4000`, served as `letter-by-letter.happydaysblr.ddns.net`.
+`homelab-letter-by-letter.service` runs `docker compose up -d` at boot and
+never builds.
+
+```bash
+cd /srv/apps/letter-by-letter
+git pull --ff-only
+sudo docker compose build --build-arg IMAGE_REVISION=$(git rev-parse --short HEAD)
+sudo docker compose up -d --no-build --force-recreate
+curl -fsS https://letter-by-letter.happydaysblr.ddns.net/health
+sudo docker buildx prune --all --force   # x1c is storage-limited
+```
+
+Rooms live in memory, so a redeploy ends games in progress. To roll back, check
+out the previous commit and repeat the build and up steps.
