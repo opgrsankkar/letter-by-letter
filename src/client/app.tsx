@@ -8,7 +8,7 @@ import {
   cleanWord,
   type PlayerView,
   type RoundSummary,
-  type Stage,
+  type GuessKind,
   type View,
 } from '../shared/protocol.ts';
 import { CATEGORIES, drawWords } from '../shared/words.ts';
@@ -184,16 +184,17 @@ function HowToPlay() {
         <li>The word's letters are shuffled and dealt to everyone else, a few each.</li>
         <li>
           <strong>Letter round:</strong> holders take turns, in the order on screen, hinting at their letters out loud
-          without saying them. The clue-giver stays quiet. A correct guess is worth {POINTS.letters} points once you have
-          hinted yours.
+          without saying them. For an E you might say “my letter is the most common one in English”. The clue-giver stays
+          quiet. Anyone can shout a guess at any time: a correct guess is worth {POINTS.letters} points if you had already
+          hinted your own letters, otherwise {POINTS.clue}.
         </li>
         <li>
           <strong>Word round:</strong> when everyone has hinted, the clue-giver may clue the whole word. A guess is now worth{' '}
           {POINTS.clue} point.
         </li>
         <li>
-          The clue-giver taps whoever got it first. They score {POINTS.hostClue} if their word needed the word clue, or{' '}
-          {POINTS.hostLetters} if the letters cracked it, so pick something tricky but gettable.
+          The clue-giver taps whoever said it first. They score {POINTS.hostClue} if their word needed the word clue, or{' '}
+          {POINTS.hostLetters} if it was guessed from letter hints, so pick something tricky but gettable.
         </li>
       </ol>
     </details>
@@ -250,6 +251,14 @@ function Table({ game, view }: { game: Game; view: View }) {
     </main>
   );
 }
+
+const KIND_LABEL: Record<GuessKind, string> = {
+  letters: 'From letter hints, after their own hint',
+  'before-hint': 'From letter hints, before their own hint',
+  clue: 'After the word clue',
+};
+
+const ordinal = (n: number) => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`;
 
 /** Fired when something might expose the screen (e.g. opening the room menu). */
 const HIDE_SECRETS = 'lbl:hide-secrets';
@@ -337,7 +346,7 @@ function ScoringStrip() {
         <strong>+{POINTS.clue}</strong> guessed after the word clue
       </li>
       <li>
-        <strong>+{POINTS.hostClue}</strong> clue-giver, if the word needed their clue (+{POINTS.hostLetters} if letters cracked it)
+        <strong>+{POINTS.hostClue}</strong> clue-giver, if the word needed their clue (+{POINTS.hostLetters} if guessed from letter hints)
       </li>
     </ul>
   );
@@ -457,7 +466,7 @@ function TimerPicker({ game, view }: { game: Game; view: View }) {
 
 function RoomSheet({ open, onClose, game, view }: { open: boolean; onClose: () => void; game: Game; view: View }) {
   const isOwner = view.you === view.ownerId;
-  const inGame = view.phase === 'choosing' || view.phase === 'reveal';
+  const inGame = view.phase !== 'lobby';
   return (
     <Sheet open={open} onClose={onClose} title={`Room ${view.code}`}>
       <div class="stack">
@@ -539,7 +548,7 @@ function LastRecap({ view, game }: { view: View; game?: Game }) {
       </span>
       {canFix && (
         <button class="btn link small recap-fix" onClick={() => setFixing(true)}>
-          Fix
+          Fix scoring
         </button>
       )}
     </p>
@@ -573,8 +582,11 @@ function Choose({ game, view }: { game: Game; view: View }) {
         <span class="kicker">Your turn to give clues</span>
         <h1 class="display">Pick a secret word</h1>
         <p class="muted">
-          Only you see it; its letters go to the other {holders} players. You score +{POINTS.hostClue} if it needs your word
-          clue, +{POINTS.hostLetters} if their letters crack it. Tricky but gettable wins.
+          Only you see it. Its letters go to the other {holders} players.
+        </p>
+        <p class="picker-scoring">
+          You score <strong>+{POINTS.hostClue}</strong> if it needs your word clue, <strong>+{POINTS.hostLetters}</strong> if
+          letter hints are enough. Want a challenge? Try <em>Tricky</em>.
         </p>
       </section>
 
@@ -835,15 +847,25 @@ function HolderPlay({ game, view, host }: { game: Game; view: View; host: Player
               </>
             ) : (
               <p class="muted center">
-                You hint after {current ? current.name : 'the others'}. Listen, and shout out the word if you get it.
+                {(() => {
+                  const before = order[myIndex - 1];
+                  const pos = `You’re ${ordinal(myIndex + 1)} of ${order.length}`;
+                  const now = current ? ` ${current.name} is hinting now.` : '';
+                  return `${pos}, right after ${before ? before.name : 'the others'}.${now} Listen, and shout out the word if you get it.`;
+                })()}
               </p>
             ))}
           {view.stage === 'clue' && <p class="muted center">Listen for the word clue, and keep guessing out loud.</p>}
         </section>
       ) : (
         <section class="intro center">
-          <h1 class="display small">You sat this one out</h1>
-          <p class="muted">You joined mid-round, so you have no letters. Guess anyway!</p>
+          <h1 class="display small">No letters for you this round</h1>
+          <p class="muted">
+            {view.hintOrder.length > 0 && view.hintOrder.length < view.players.length - 1
+              ? 'Short word, big table: not everyone gets a letter.'
+              : 'You joined after the deal.'}{' '}
+            Listen to the hints and shout out the word. A guess now is worth +{guessValue(view, view.players.find((p) => p.id === view.you)!)}.
+          </p>
         </section>
       )}
       <HostAwayNotice game={game} host={host} />
@@ -947,6 +969,15 @@ function HostPlay({ game, view }: { game: Game; view: View }) {
         </button>
       </section>
 
+      <p class={`host-status${view.stage === 'clue' ? ' is-live' : ''}`} role="status">
+        <span class="stage-step">{view.stage === 'letters' ? '1 of 2' : '2 of 2'}</span>
+        {view.stage === 'letters'
+          ? current
+            ? `Stay quiet. ${current.name} is hinting.`
+            : 'Everyone has hinted. Your word clue is next.'
+          : 'Your turn: clue the whole word out loud.'}
+      </p>
+
       <section class="card stack guess-card">
         <div>
           <h2 class="display small">Heard the word?</h2>
@@ -1021,9 +1052,9 @@ function HostPlay({ game, view }: { game: Game; view: View }) {
                 ) : (
                   <span class="chip">Someone</span>
                 )}
-                <span class="tile-row">
+                <span class="tile-row" aria-hidden={hideWord || undefined}>
                   {letters.map((l, i) => (
-                    <Tile key={i} letter={l} size="sm" />
+                    <Tile key={i} letter={l} size="sm" hidden={hideWord} />
                   ))}
                 </span>
               </li>
@@ -1044,8 +1075,7 @@ function PointsLine({ view, last }: { view: View; last: RoundSummary }) {
   if (entries.length === 0) return null;
   const why = (pid: string, n: number) => {
     if (pid === last.hostId) return n === POINTS.hostClue ? ' word needed the clue' : ' for their word';
-    if (last.stage === 'letters') return n === POINTS.letters ? ' from letters' : ' hadn’t hinted yet';
-    return ' after the clue';
+    return ' ' + KIND_LABEL[last.kind ?? 'clue'].toLowerCase();
   };
   return (
     <ul class="points-line">
@@ -1065,22 +1095,24 @@ function PointsLine({ view, last }: { view: View; last: RoundSummary }) {
 
 /** The last clue-giver's correction panel: who guessed, and when. */
 function FixPanel({ view, game, last, onDone }: { view: View; game: Game; last: RoundSummary; onDone: () => void }) {
-  const [stage, setStage] = useState<Stage>(last.stage ?? 'clue');
+  const [kind, setKind] = useState<GuessKind>(last.kind ?? (last.stage === 'clue' ? 'clue' : 'letters'));
   return (
     <section class="card stack">
       <h2 class="display small">Who really guessed {last.word}?</h2>
-      <div class="segmented" role="radiogroup" aria-label="When was it guessed?">
-        {(['letters', 'clue'] as const).map((st) => (
-          <button key={st} role="radio" aria-checked={stage === st} class={stage === st ? 'is-on' : ''} onClick={() => setStage(st)}>
-            {st === 'letters' ? `From letters · +${POINTS.letters}` : `After clue · +${POINTS.clue}`}
+      <div class="kind-options" role="radiogroup" aria-label="How was it guessed?">
+        {(['letters', 'before-hint', 'clue'] as const).map((k) => (
+          <button key={k} role="radio" aria-checked={kind === k} class={kind === k ? 'is-on' : ''} onClick={() => setKind(k)}>
+            <span>{KIND_LABEL[k]}</span>
+            <strong>+{k === 'letters' ? POINTS.letters : POINTS.clue}</strong>
           </button>
         ))}
       </div>
+      <p class="muted small">Then tap who said it first. +{POINTS.letters} only counts for someone who had hinted their own letters.</p>
       <GuessButtons
         view={view}
         highlight={last.guesserId}
         onPick={(id) => {
-          game.send({ type: 'award', playerId: id, stage });
+          game.send({ type: 'award', playerId: id, kind });
           onDone();
         }}
       />
@@ -1118,7 +1150,8 @@ function Reveal({ game, view }: { game: Game; view: View }) {
         {last.word ? <TileWord word={last.word} stagger={90} fit={{ max: 56, inset: 32 }} /> : <span class="muted">(never chosen)</span>}
         {guesser ? (
           <p class={`verdict team-${guesser.team}`}>
-            <strong>{guesser.name}</strong> got it {last.stage === 'letters' ? 'from the letters alone!' : 'after the word clue'}
+            <strong>{guesser.name}</strong> got it{' '}
+            {last.kind === 'letters' ? 'from the letters alone!' : last.kind === 'before-hint' ? 'from the letters, before hinting' : 'after the word clue'}
           </p>
         ) : (
           <p class="verdict">Nobody got it this time</p>
@@ -1134,6 +1167,21 @@ function Reveal({ game, view }: { game: Game; view: View }) {
           Wrong person or points? Fix it
         </button>
       ))}
+
+      <div class="dock">
+        {canAdvance ? (
+          <>
+            <button class="btn primary big" onClick={() => game.send({ type: 'next' })}>
+              Next round
+            </button>
+            {isLastHost && <p class="muted small center">You can still fix the credit until the next word is dealt.</p>}
+          </>
+        ) : (
+          <p class="status-line" role="status">
+            Waiting for {host?.name ?? 'the clue-giver'} to start the next round…
+          </p>
+        )}
+      </div>
 
       {Object.keys(last.holdings).length > 0 && (
         <section class="card">
@@ -1161,20 +1209,6 @@ function Reveal({ game, view }: { game: Game; view: View }) {
         <TeamColumns view={view} showScores />
       </section>
 
-      <div class="dock">
-        {canAdvance ? (
-          <>
-            <button class="btn primary big" onClick={() => game.send({ type: 'next' })}>
-              Next round
-            </button>
-            {isLastHost && <p class="muted small center">You can still fix the credit until the next word is dealt.</p>}
-          </>
-        ) : (
-          <p class="status-line" role="status">
-            Waiting for {host?.name ?? 'the clue-giver'} to start the next round…
-          </p>
-        )}
-      </div>
     </div>
   );
 }

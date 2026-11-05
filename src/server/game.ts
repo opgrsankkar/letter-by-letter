@@ -11,6 +11,7 @@ import {
   type Phase,
   POINTS,
   type RoundSummary,
+  type GuessKind,
   type Stage,
   type Team,
   type View,
@@ -60,8 +61,11 @@ export class Room {
   last: RoundSummary | null = null;
   ended = false;
   stage: Stage | null = null;
+  /** Players who left with points; their points still count for their team. */
+  private departed: Player[] = [];
   private hinted = new Set<string>();
   private hintOrder: string[] = [];
+
   private early = false;
   /** Secret state for the round in progress. */
   private word: string | null = null;
@@ -107,10 +111,16 @@ export class Room {
     return Math.max(...this.players.map((p) => p.awaySince ?? 0));
   }
 
+  /** Team totals, including points earned by players who have since left. */
   scores(): Record<Team, number> {
     const out = { ember: 0, tide: 0 } as Record<Team, number>;
-    for (const p of this.players) out[p.team] += p.score;
+    for (const p of [...this.players, ...this.departed]) out[p.team] += p.score;
     return out;
+  }
+
+  /** A current player, or the record of one who left (for score corrections). */
+  private scoreHolder(id: string): Player | undefined {
+    return this.player(id) ?? this.departed.find((p) => p.id === id);
   }
 
   // -- membership --------------------------------------------------------------
@@ -153,7 +163,10 @@ export class Room {
   removePlayer(id: string): void {
     const idx = this.players.findIndex((p) => p.id === id);
     if (idx < 0) return;
-    this.players.splice(idx, 1);
+    const wasHinted = this.hinted.has(id);
+    const [gone] = this.players.splice(idx, 1);
+    // Their points stay with their team.
+    if (gone.score !== 0) this.departed.push(gone);
     for (const team of TEAMS) this.hostBags[team] = this.hostBags[team].filter((pid) => pid !== id);
     this.hinted.delete(id);
     this.hintOrder = this.hintOrder.filter((pid) => pid !== id);
@@ -163,7 +176,7 @@ export class Room {
         // The clue-giver walked away: show everyone the word and move on.
         this.finishRound(null);
       } else {
-        this.rehome(id);
+        this.rehome(id, wasHinted);
       }
     } else if (this.phase === 'choosing' && id === this.hostId) {
       this.beginChoosing(false);
@@ -207,6 +220,7 @@ export class Room {
         throw new GameError('too_few_players', `Need at least ${LIMITS.minPlayers} players here to play.`);
       }
       for (const p of this.players) p.score = 0;
+      this.departed = [];
       this.round = 0;
       this.last = null;
       this.ended = false;
@@ -239,23 +253,28 @@ export class Room {
     if (!word) {
       throw new GameError('bad_word', `Words are ${LIMITS.wordMin}-${LIMITS.wordMax} letters, A to Z only.`);
     }
-    const holders = shuffle(
-      this.connectedPlayers().filter((p) => p.id !== id).map((p) => p.id),
-      this.deps.rand,
-    );
+    // Hinting goes "clockwise" from the clue-giver's left, using join order as
+    // the seating order. As the clue-giver role moves round the table, so does
+    // everyone's turn: over a full cycle each player sits in every position once.
+    const seat = this.players.findIndex((p) => p.id === id);
+    const ring = [...this.players.slice(seat + 1), ...this.players.slice(0, seat)];
+    const holders = ring.filter((p) => p.connected).map((p) => p.id);
     if (holders.length < LIMITS.minPlayers - 1) {
       throw new GameError('too_few_players', 'Need at least two other players here to deal letters.');
     }
     const letters = shuffle(word.split(''), this.deps.rand);
-    this.holdings = new Map(holders.map((pid) => [pid, [] as string[]]));
+    // A short word at a big table leaves some players without letters: they
+    // just listen and guess, and are not part of the hinting order.
+    const dealtTo = holders.slice(0, Math.min(holders.length, letters.length));
+    this.holdings = new Map(dealtTo.map((pid) => [pid, [] as string[]]));
     letters.forEach((letter, i) => {
-      this.holdings.get(holders[i % holders.length])!.push(letter);
+      this.holdings.get(dealtTo[i % dealtTo.length])!.push(letter);
     });
     this.word = word;
     this.phase = 'playing';
     this.stage = 'letters';
     this.hinted = new Set();
-    this.hintOrder = [...holders];
+    this.hintOrder = [...dealtTo];
     this.early = false;
     this.deadline = this.timerSeconds > 0 ? this.deps.now() + this.timerSeconds * 1000 : null;
   }
@@ -301,19 +320,16 @@ export class Room {
     this.stage = 'clue';
   }
 
-  /** Points a guess by `guesserId` is worth right now. */
-  private guessValue(guesserId: string): number {
-    if (this.stage !== 'letters') return POINTS.clue;
-    const holds = this.holdings.has(guesserId);
-    return !holds || this.hinted.has(guesserId) ? POINTS.letters : POINTS.clue;
-  }
-
   /**
-   * The clue-giver credits whoever guessed (or nobody), ending the round. During
-   * the reveal the same player may correct a mis-tap: the round's points are
-   * re-scored for the new choice, and `stage` may correct when it was guessed.
+   * The clue-giver credits whoever guessed (or nobody), ending the round.
+   *
+   * The phones cannot hear when a guess was spoken, so `kind` lets the
+   * clue-giver say how it came about: a player who shouted the word and only
+   * then tapped "hinted" guessed 'before-hint'. Until the next word is dealt the
+   * same player may correct the guesser and the kind; points are re-scored.
+   * Nobody can be given a full +2 they could not have earned in that round.
    */
-  award(id: string, guesserId: string | null, stage?: Stage): void {
+  award(id: string, guesserId: string | null, kind?: GuessKind): void {
     this.requirePhase(['playing', 'reveal', 'choosing']);
     // Corrections stay open until the next word is dealt.
     if (this.phase !== 'playing') {
@@ -323,19 +339,41 @@ export class Room {
       }
       this.validateGuesser(id, guesserId);
       for (const [pid, pts] of Object.entries(last.points)) {
-        const p = this.player(pid);
+        const p = this.scoreHolder(pid);
         if (p) p.score -= pts;
       }
-      if (stage) last.stage = stage;
       last.guesserId = guesserId;
-      const clue = (last.stage ?? 'clue') === 'clue';
-      last.points = this.scoreRound(id, guesserId, clue ? POINTS.clue : POINTS.letters, this.hostValue(clue, last.early));
+      const fallback: GuessKind = last.stage === 'clue' ? 'clue' : 'letters';
+      last.kind = guesserId ? this.settleKind(guesserId, kind ?? last.kind ?? fallback, last.eligible) : null;
+      last.points = this.scoreKind(id, guesserId, last.kind, last.early);
       return;
     }
     this.requireHost(id);
     this.validateGuesser(id, guesserId);
-    const value = guesserId ? this.guessValue(guesserId) : 0;
-    this.finishRound(guesserId, this.scoreRound(id, guesserId, value, this.hostValue(this.stage === 'clue', this.early)));
+    const eligible = this.eligibleNow();
+    let final: GuessKind | null = null;
+    if (guesserId) {
+      // Default from the stage; a word-clue guess cannot predate the word clue.
+      const asked = kind ?? (this.stage === 'clue' ? 'clue' : 'letters');
+      final = this.settleKind(guesserId, asked === 'clue' && this.stage !== 'clue' ? 'letters' : asked, eligible);
+    }
+    this.finishRound(guesserId, this.scoreKind(id, guesserId, final, this.early), final, eligible);
+  }
+
+  /** Who could earn a full letter-stage +2 right now. */
+  private eligibleNow(): string[] {
+    return this.players.filter((p) => !this.holdings.has(p.id) || this.hinted.has(p.id)).map((p) => p.id);
+  }
+
+  /** Never more than the guesser could have earned: no +2 without having hinted. */
+  private settleKind(guesserId: string, kind: GuessKind, eligible: string[]): GuessKind {
+    return kind === 'letters' && !eligible.includes(guesserId) ? 'before-hint' : kind;
+  }
+
+  private scoreKind(hostId: string, guesserId: string | null, kind: GuessKind | null, early: boolean): Record<string, number> {
+    if (!guesserId || !kind) return {};
+    const value = kind === 'letters' ? POINTS.letters : POINTS.clue;
+    return this.scoreRound(hostId, guesserId, value, this.hostValue(kind === 'clue', early));
   }
 
   private hostValue(neededClue: boolean, early: boolean): number {
@@ -472,13 +510,18 @@ export class Room {
     points[guesserId] = value;
     points[hostId] = (points[hostId] ?? 0) + hostValue;
     for (const [pid, pts] of Object.entries(points)) {
-      const p = this.player(pid);
+      const p = this.scoreHolder(pid);
       if (p) p.score += pts;
     }
     return points;
   }
 
-  private finishRound(guesserId: string | null, points: Record<string, number> = {}): void {
+  private finishRound(
+    guesserId: string | null,
+    points: Record<string, number> = {},
+    kind: GuessKind | null = null,
+    eligible: string[] = this.eligibleNow(),
+  ): void {
     this.last = {
       round: this.round,
       word: this.word ?? '',
@@ -486,6 +529,8 @@ export class Room {
       guesserId,
       stage: this.stage,
       early: this.early,
+      eligible,
+      kind,
       points,
       holdings: Object.fromEntries(this.holdings),
     };
@@ -499,17 +544,23 @@ export class Room {
     this.phase = 'reveal';
   }
 
-  /** Hand a departing holder's letters to whoever (present) holds the fewest. */
-  private rehome(id: string): void {
+  /**
+   * Hand a departing holder's letters on, preferring players who are here and
+   * have not hinted yet, then whoever holds the fewest. If the letters were
+   * never hinted, a recipient who already had to hint again.
+   */
+  private rehome(id: string, wasHinted: boolean): void {
     const orphaned = this.holdings.get(id);
     if (!orphaned) return;
     this.holdings.delete(id);
     const candidates = [...this.holdings.keys()].filter((pid) => this.player(pid)?.connected);
     const pool = candidates.length > 0 ? candidates : [...this.holdings.keys()];
+    const rank = (pid: string) => (this.hinted.has(pid) ? 1000 : 0) + this.holdings.get(pid)!.length;
     for (const letter of orphaned) {
       if (pool.length === 0) break;
-      pool.sort((a, b) => this.holdings.get(a)!.length - this.holdings.get(b)!.length);
+      pool.sort((a, b) => rank(a) - rank(b));
       this.holdings.get(pool[0])!.push(letter);
+      if (!wasHinted && this.stage === 'letters') this.hinted.delete(pool[0]);
     }
   }
 

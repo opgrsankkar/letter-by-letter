@@ -138,6 +138,7 @@ test('a full round: deal, private views, award, reveal, next', () => {
   assert.equal(reveal.last!.word, 'ORANGE');
   assert.equal(reveal.last!.guesserId, others[1].id);
   assert.equal(reveal.last!.stage, 'letters');
+  assert.equal(reveal.last!.kind, 'letters');
   assert.deepEqual(reveal.last!.points, { [others[1].id]: 2, [hostId]: 1 });
   assert.equal(reveal.letters, null);
   assert.equal(reveal.scores.ember + reveal.scores.tide, 3);
@@ -189,7 +190,7 @@ test('a letter-stage guess only earns +2 if the guesser had hinted their own let
   assert.equal(room.player(early.id)!.score, 2);
   room.award(host, early.id, 'clue');
   assert.equal(room.player(early.id)!.score, 1);
-  assert.equal(room.last!.stage, 'clue');
+  assert.equal(room.last!.kind, 'clue');
   assert.equal(room.player(host)!.score, 2);
 });
 
@@ -261,7 +262,7 @@ test('the clue-giver can correct who guessed during the reveal', () => {
   const host = room.hostId!;
   const [a, b] = players.filter((p) => p.id !== host);
   room.deal(host, 'BEAVER');
-  hintThrough(room, a.id);
+  hintThrough(room);
   room.award(host, a.id);
   assert.equal(room.player(a.id)!.score, 2);
   throwsCode(() => room.award(a.id, b.id), 'not_allowed');
@@ -493,4 +494,143 @@ test('registry: codes, resume, and sweeping', () => {
   deps.advance(2_000);
   reg.sweep();
   assert.ok(!reg.rooms.has(a.room.code));
+});
+
+// --- Findings from the gpt-6.1-sol review --------------------------------------
+
+test('a short word at a big table: players without letters are not in the hint queue', () => {
+  const { room, players } = roomWith(10);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'OWL');
+  const order = room.viewFor(host).hintOrder;
+  assert.equal(order.length, 3);
+  for (const pid of order) assert.equal(room.viewFor(pid).letters!.length, 1);
+  const spectator = players.find((p) => p.id !== host && !order.includes(p.id))!;
+  assert.equal(room.viewFor(spectator.id).letters, null);
+  hintThrough(room);
+  assert.deepEqual(room.pendingHinters(), []);
+  // Someone with nothing to hint gets the full letter-stage value.
+  room.award(host, spectator.id);
+  assert.equal(room.player(spectator.id)!.score, 2);
+});
+
+test('correcting credit never upgrades a guesser who had not hinted', () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'BADGER');
+  const [first, , last] = room.viewFor(host).hintOrder;
+  room.markHinted(first, true);
+  room.award(host, last);
+  assert.equal(room.player(last)!.score, 1);
+  room.award(host, last, 'letters');
+  assert.equal(room.player(last)!.score, 1, 'still +1: they had not hinted');
+  room.award(host, first, 'letters');
+  assert.equal(room.player(first)!.score, 2);
+  assert.equal(room.player(last)!.score, 0);
+});
+
+test("leaving keeps a player's points with their team, and corrections still balance", () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'COMET');
+  hintThrough(room);
+  const scorer = room.player(players.find((p) => p.id !== host && p.id !== players[0].id)!.id)!;
+  room.award(host, scorer.id);
+  const before = room.scores();
+  room.removePlayer(scorer.id);
+  assert.deepEqual(room.scores(), before, 'team totals unchanged after leaving');
+  // The clue-giver moves the credit to someone else: the leaver's points come off.
+  const other = players.find((p) => p.id !== host && p.id !== scorer.id)!;
+  room.award(host, other.id);
+  const total = room.scores().ember + room.scores().tide;
+  assert.equal(total, 2 + 1, 'one guesser (+2) plus the clue-giver (+1)');
+});
+
+test('letters handed on from someone who never hinted must be hinted again', () => {
+  const { room, players } = roomWith(3);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'TEAPOT');
+  const [a, b] = room.viewFor(host).hintOrder;
+  room.markHinted(a, true);
+  room.removePlayer(b);
+  assert.equal(room.viewFor(a).letters!.length, 6);
+  assert.deepEqual(room.pendingHinters(), [a], 'the new letters still need hinting');
+  // A holder who had hinted leaving does not reset anyone.
+  const r2 = roomWith(4);
+  r2.room.start(r2.players[0].id);
+  const h2 = r2.room.hostId!;
+  r2.room.deal(h2, 'TEAPOT');
+  const [x, y] = r2.room.viewFor(h2).hintOrder;
+  r2.room.markHinted(x, true);
+  r2.room.markHinted(y, true);
+  r2.room.removePlayer(y);
+  assert.ok(!r2.room.pendingHinters().includes(x));
+});
+
+// --- Findings from the six-player gpt-6.1-sol playtest --------------------------
+
+test('a guess shouted before hinting can be scored +1 even if they hinted before the tap', () => {
+  const { room, players } = roomWith(4);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'OCTOPUS');
+  const order = room.viewFor(host).hintOrder;
+  // Chen (order[0]) shouts OCTOPUS, then taps "hinted" before the clue-giver credits him.
+  room.markHinted(order[0], true);
+  room.award(host, order[0], 'before-hint');
+  assert.equal(room.player(order[0])!.score, 1);
+  assert.equal(room.player(host)!.score, 1);
+  assert.equal(room.last!.kind, 'before-hint');
+  // And the fix panel can move between all three kinds.
+  room.award(host, order[0], 'letters');
+  assert.equal(room.player(order[0])!.score, 2);
+  room.award(host, order[0], 'before-hint');
+  assert.equal(room.player(order[0])!.score, 1);
+  assert.equal(room.player(host)!.score, 1);
+  room.award(host, order[0], 'clue');
+  assert.equal(room.player(host)!.score, 2, 'needed the clue');
+  assert.equal(room.scores().ember + room.scores().tide, 3);
+});
+
+test('a word-clue guess cannot be claimed before the word clue started', () => {
+  const { room, players } = roomWith(3);
+  room.start(players[0].id);
+  const host = room.hostId!;
+  room.deal(host, 'KETTLE');
+  hintThrough(room);
+  const guesser = room.viewFor(host).hintOrder[0];
+  room.award(host, guesser, 'clue');
+  assert.equal(room.last!.kind, 'letters');
+  assert.equal(room.player(host)!.score, 1);
+});
+
+test('hinting order rotates fairly: nobody is stuck going last', () => {
+  for (let seed = 1; seed <= 20; seed += 1) {
+    const { room, players } = roomWith(6, seed);
+    room.start(players[0].id);
+    const lateness = new Map<string, number[]>();
+    let previousLast: string | null = null;
+    for (let r = 0; r < 12; r += 1) {
+      const host = room.hostId!;
+      room.deal(host, 'PINEAPPLE');
+      const order = room.viewFor(host).hintOrder;
+      order.forEach((pid, i) => lateness.set(pid, [...(lateness.get(pid) ?? []), i / (order.length - 1)]));
+      const last = order[order.length - 1];
+      assert.notEqual(last, previousLast, `seed ${seed}: same player last twice running`);
+      previousLast = last;
+      room.award(host, null);
+      room.next(host);
+    }
+    const means = [...lateness.values()].map((xs) => xs.reduce((a, b) => a + b, 0) / xs.length);
+    assert.ok(Math.max(...means) - Math.min(...means) <= 0.3, `seed ${seed}: spread ${Math.max(...means) - Math.min(...means)}`);
+  }
+});
+
+test('word deck has no duplicates across categories', () => {
+  const all = CATEGORIES.flatMap((c) => c.words);
+  assert.equal(new Set(all).size, all.length);
 });
