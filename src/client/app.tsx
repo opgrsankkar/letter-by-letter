@@ -548,7 +548,7 @@ function LastRecap({ view, game }: { view: View; game?: Game }) {
       </span>
       {canFix && (
         <button class="btn link small recap-fix" onClick={() => setFixing(true)}>
-          Fix
+          Fix scoring
         </button>
       )}
     </p>
@@ -582,8 +582,11 @@ function Choose({ game, view }: { game: Game; view: View }) {
         <span class="kicker">Your turn to give clues</span>
         <h1 class="display">Pick a secret word</h1>
         <p class="muted">
-          Only you see it; its letters go to the other {holders} players. You score +{POINTS.hostClue} if it needs your word
-          clue, +{POINTS.hostLetters} if it’s guessed from letter hints. Tricky but gettable wins: try the Tricky list.
+          Only you see it. Its letters go to the other {holders} players.
+        </p>
+        <p class="picker-scoring">
+          You score <strong>+{POINTS.hostClue}</strong> if it needs your word clue, <strong>+{POINTS.hostLetters}</strong> if
+          letter hints are enough. Want a challenge? Try <em>Tricky</em>.
         </p>
       </section>
 
@@ -1165,6 +1168,21 @@ function Reveal({ game, view }: { game: Game; view: View }) {
         </button>
       ))}
 
+      <div class="dock">
+        {canAdvance ? (
+          <>
+            <button class="btn primary big" onClick={() => game.send({ type: 'next' })}>
+              Next round
+            </button>
+            {isLastHost && <p class="muted small center">You can still fix the credit until the next word is dealt.</p>}
+          </>
+        ) : (
+          <p class="status-line" role="status">
+            Waiting for {host?.name ?? 'the clue-giver'} to start the next round…
+          </p>
+        )}
+      </div>
+
       {Object.keys(last.holdings).length > 0 && (
         <section class="card">
           <span class="field-label">Who held what</span>
@@ -1191,20 +1209,6 @@ function Reveal({ game, view }: { game: Game; view: View }) {
         <TeamColumns view={view} showScores />
       </section>
 
-      <div class="dock">
-        {canAdvance ? (
-          <>
-            <button class="btn primary big" onClick={() => game.send({ type: 'next' })}>
-              Next round
-            </button>
-            {isLastHost && <p class="muted small center">You can still fix the credit until the next word is dealt.</p>}
-          </>
-        ) : (
-          <p class="status-line" role="status">
-            Waiting for {host?.name ?? 'the clue-giver'} to start the next round…
-          </p>
-        )}
-      </div>
     </div>
   );
 }

@@ -209,7 +209,7 @@ test('three players play a full round in the browser', { timeout: 60_000 }, asyn
     await all.find((p) => p.page.url() && p !== host)!.page.getByText('Last round').waitFor();
 
     // Until the next word is dealt, the last clue-giver can still fix the credit.
-    await host.page.getByRole('button', { name: 'Fix', exact: true }).click();
+    await host.page.getByRole('button', { name: 'Fix scoring', exact: true }).click();
     await host.page.getByRole('radio', { name: /After the word clue/ }).click();
     await host.page.getByRole('button', { name: `${holders[1].name} guessed it` }).click();
     for (const p of all) await p.page.locator('.recap', { hasText: `${holders[1].name} +1` }).waitFor();

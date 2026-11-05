@@ -6,7 +6,7 @@
   --card: #fffaf0;
   --ink: #1d1a16;
   --ink-2: #5b5247;
-  --ink-3: #8a7f70;
+  --ink-3: #6f6456;
   --line: #ddd0b8;
   --tile: #fff8ea;
   --tile-edge: #c9b48f;
@@ -32,7 +32,7 @@
     --card: #231d17;
     --ink: #f3eadb;
     --ink-2: #c4b8a6;
-    --ink-3: #8f8475;
+    --ink-3: #a89c8c;
     --line: #3a3128;
     --tile: #f6ecd8;
     --tile-edge: #9c8762;
@@ -1321,4 +1321,16 @@ button {
   border-color: var(--ink);
   background: var(--ink);
   color: var(--paper);
+}
+
+/* The reveal keeps its main action in normal flow, so it never covers content. */
+.phase-reveal .dock {
+  position: static;
+  background: none;
+  padding-top: 0;
+}
+.picker-scoring {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-2);
 }
